@@ -56,8 +56,8 @@ jobs:
             fi
 
             echo "Building ${GOOS}/${GOARCH}..."
-            GOOS=${GOOS} GOARCH=${GOARCH} go build -ldflags "${LDFLAGS}" -o "${output}/ghx${EXE_SUFFIX}" ./cmd/ghx
-            GOOS=${GOOS} GOARCH=${GOARCH} go build -ldflags "${LDFLAGS}" -o "${output}/ghxd${EXE_SUFFIX}" ./cmd/ghxd
+            GOOS=${GOOS} GOARCH=${GOARCH} go build -ldflags "${LDFLAGS}" -o "${output}/ghx${EXE_SUFFIX}" ./src/cmd/ghx
+            GOOS=${GOOS} GOARCH=${GOARCH} go build -ldflags "${LDFLAGS}" -o "${output}/ghxd${EXE_SUFFIX}" ./src/cmd/ghxd
 
             if [ "${GOOS}" = "windows" ]; then
               # Include gh.cmd shim for Windows

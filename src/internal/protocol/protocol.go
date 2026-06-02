@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"io"
 
-	execctx "github.com/brunoborges/ghx/internal/context"
+	execctx "github.com/brunoborges/ghx/src/internal/context"
 )
 
 // Request is sent from the ghx client to the ghxd daemon.

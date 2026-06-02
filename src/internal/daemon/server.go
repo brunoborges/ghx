@@ -13,14 +13,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/brunoborges/ghx/internal/allowlist"
-	"github.com/brunoborges/ghx/internal/cache"
-	"github.com/brunoborges/ghx/internal/config"
-	"github.com/brunoborges/ghx/internal/dashboard"
-	"github.com/brunoborges/ghx/internal/ghcli"
-	"github.com/brunoborges/ghx/internal/ipc"
-	"github.com/brunoborges/ghx/internal/metrics"
-	"github.com/brunoborges/ghx/internal/protocol"
+	"github.com/brunoborges/ghx/src/internal/allowlist"
+	"github.com/brunoborges/ghx/src/internal/cache"
+	"github.com/brunoborges/ghx/src/internal/config"
+	"github.com/brunoborges/ghx/src/internal/dashboard"
+	"github.com/brunoborges/ghx/src/internal/ghcli"
+	"github.com/brunoborges/ghx/src/internal/ipc"
+	"github.com/brunoborges/ghx/src/internal/metrics"
+	"github.com/brunoborges/ghx/src/internal/protocol"
 )
 
 // ghPathRefreshInterval is how often the daemon re-resolves the gh binary path.

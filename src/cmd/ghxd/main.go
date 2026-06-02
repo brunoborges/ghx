@@ -5,9 +5,9 @@ import (
 	"log"
 	"os"
 
-	"github.com/brunoborges/ghx/internal/config"
-	"github.com/brunoborges/ghx/internal/daemon"
-	"github.com/brunoborges/ghx/internal/ghcli"
+	"github.com/brunoborges/ghx/src/internal/config"
+	"github.com/brunoborges/ghx/src/internal/daemon"
+	"github.com/brunoborges/ghx/src/internal/ghcli"
 )
 
 var version = "dev"

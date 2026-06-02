@@ -8,7 +8,7 @@ import (
 	"os/exec"
 	"syscall"
 
-	"github.com/brunoborges/ghx/internal/config"
+	"github.com/brunoborges/ghx/src/internal/config"
 )
 
 // startDaemon launches ghxd as a background process.

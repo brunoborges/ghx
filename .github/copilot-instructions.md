@@ -8,8 +8,8 @@ make test           # go test ./...
 make clean          # rm -rf bin/
 
 # Single package test
-go test ./internal/allowlist/ -v
-go test ./internal/cache/ -v -run TestTTLExpiry
+go test ./src/internal/allowlist/ -v
+go test ./src/internal/cache/ -v -run TestTTLExpiry
 
 # Lint (matches CI)
 go vet ./...
@@ -23,8 +23,8 @@ go test -v -race -coverprofile=coverage.out ./...
 
 **Two-binary daemon/client model** for caching `gh` CLI calls across concurrent AI agents:
 
-- **`ghx`** (client, `cmd/ghc/`) — Drop-in `gh` replacement. Resolves git context (host, repo, branch, token), classifies the command, and sends an IPC request to the daemon. Auto-starts the daemon if needed. Falls back to direct `gh` execution on any daemon failure.
-- **`ghxd`** (daemon, `cmd/ghxd/`) — Long-lived daemon. Accepts requests over a Unix domain socket (`~/.ghx/ghxd.sock`), serves cached responses, and runs a web dashboard on port 9847.
+- **`ghx`** (client, `src/cmd/ghx/`) — Drop-in `gh` replacement. Resolves git context (host, repo, branch, token), classifies the command, and sends an IPC request to the daemon. Auto-starts the daemon if needed. Falls back to direct `gh` execution on any daemon failure.
+- **`ghxd`** (daemon, `src/cmd/ghxd/`) — Long-lived daemon. Accepts requests over a Unix domain socket (`~/.ghx/ghxd.sock`), serves cached responses, and runs a web dashboard on port 9847.
 
 **Request flow:** `ghx` → Unix socket IPC → `ghxd` handler → allowlist classifier → cache lookup → (on miss) `executor.Execute("gh", ...)` → cache store → response back to client.
 

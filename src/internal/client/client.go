@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/brunoborges/ghx/internal/ipc"
-	"github.com/brunoborges/ghx/internal/protocol"
+	"github.com/brunoborges/ghx/src/internal/ipc"
+	"github.com/brunoborges/ghx/src/internal/protocol"
 )
 
 // Client communicates with the ghxd daemon over IPC (Unix socket or Windows named pipe).

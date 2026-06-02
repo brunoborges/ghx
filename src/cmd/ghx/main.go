@@ -11,11 +11,11 @@ import (
 	"strings"
 	"time"
 
-	"github.com/brunoborges/ghx/internal/client"
-	"github.com/brunoborges/ghx/internal/config"
-	execctx "github.com/brunoborges/ghx/internal/context"
-	"github.com/brunoborges/ghx/internal/ghcli"
-	"github.com/brunoborges/ghx/internal/protocol"
+	"github.com/brunoborges/ghx/src/internal/client"
+	"github.com/brunoborges/ghx/src/internal/config"
+	execctx "github.com/brunoborges/ghx/src/internal/context"
+	"github.com/brunoborges/ghx/src/internal/ghcli"
+	"github.com/brunoborges/ghx/src/internal/protocol"
 )
 
 var version = "dev"

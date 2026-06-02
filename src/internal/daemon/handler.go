@@ -9,14 +9,14 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/brunoborges/ghx/internal/allowlist"
-	"github.com/brunoborges/ghx/internal/cache"
-	"github.com/brunoborges/ghx/internal/config"
-	execctx "github.com/brunoborges/ghx/internal/context"
-	"github.com/brunoborges/ghx/internal/executor"
-	"github.com/brunoborges/ghx/internal/ghcli"
-	"github.com/brunoborges/ghx/internal/metrics"
-	"github.com/brunoborges/ghx/internal/protocol"
+	"github.com/brunoborges/ghx/src/internal/allowlist"
+	"github.com/brunoborges/ghx/src/internal/cache"
+	"github.com/brunoborges/ghx/src/internal/config"
+	execctx "github.com/brunoborges/ghx/src/internal/context"
+	"github.com/brunoborges/ghx/src/internal/executor"
+	"github.com/brunoborges/ghx/src/internal/ghcli"
+	"github.com/brunoborges/ghx/src/internal/metrics"
+	"github.com/brunoborges/ghx/src/internal/protocol"
 )
 
 // Handler processes incoming requests from clients.
