@@ -38,7 +38,7 @@ curl -fsSL https://raw.githubusercontent.com/brunoborges/ghx/main/install.sh | b
 irm https://raw.githubusercontent.com/brunoborges/ghx/main/install.ps1 | iex
 ```
 
-See the [full documentation](DOCS.md#install) for manual download, building from source, and agent plugin setup.
+See the [full documentation](specs/DOCS.md#install) for manual download, building from source, and agent plugin setup.
 
 ### Usage
 
@@ -57,7 +57,7 @@ Second call:  ghx pr list ...   → 0.1s (cache hit, instant)
 
 ## Documentation
 
-📖 **[Full documentation](DOCS.md)** — install options, configuration, daemon & cache management, what gets cached, architecture, and more.
+📖 **[Full documentation](specs/DOCS.md)** — install options, configuration, daemon & cache management, what gets cached, architecture, and more.
 
 ## License
 

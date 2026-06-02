@@ -481,12 +481,15 @@ ghx/
 │   └── skills/              # Agent skill definitions
 ├── docs/                    # GitHub Pages site
 │   └── index.html
+├── specs/                   # Project specs & docs
+│   ├── ADR.md
+│   ├── DOCS.md
+│   └── SPEC.md
 ├── install.sh               # Unix installer (curl | sh)
 ├── install.ps1              # Windows installer (irm | iex)
 ├── go.mod
 ├── go.sum
 ├── Makefile
-├── SPEC.md
 └── README.md
 ```
 
