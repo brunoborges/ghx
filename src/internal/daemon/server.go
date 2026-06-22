@@ -142,7 +142,9 @@ func (s *Server) handleConn(conn net.Conn) {
 	defer s.wg.Done()
 	defer conn.Close()
 
-	conn.SetDeadline(time.Now().Add(60 * time.Second))
+	// Short read deadline guards against clients that connect but never send a
+	// request (e.g. health-check probes from IsRunning that close immediately).
+	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
 
 	var req protocol.Request
 	if err := protocol.ReadMessage(conn, &req); err != nil {
@@ -152,6 +154,12 @@ func (s *Server) handleConn(conn net.Conn) {
 		}
 		return
 	}
+
+	// Remove all deadlines before executing the command. Long-running gh commands
+	// (multi-minute GraphQL queries, large JSON payloads) must not be cut off by
+	// a fixed socket timeout, which would cause the client to fall back to direct
+	// execution and silently double-spend API quota.
+	conn.SetDeadline(time.Time{})
 
 	resp := s.handler.Handle(&req)
 

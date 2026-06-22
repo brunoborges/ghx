@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -86,6 +87,16 @@ func main() {
 
 	resp, err := cl.Send(req)
 	if err != nil {
+		var errSent *client.ErrRequestSent
+		if errors.As(err, &errSent) {
+			// The request reached the daemon, which may have already executed the
+			// command. Falling back to direct gh would cause silent double-execution
+			// (duplicate API calls, quota double-spend, or repeated side-effects for
+			// mutating commands). Abort instead and let the user decide.
+			fmt.Fprintf(os.Stderr, "ghx: daemon error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "ghx: not falling back — command may have already been executed by the daemon\n")
+			os.Exit(1)
+		}
 		fmt.Fprintf(os.Stderr, "ghx: daemon error: %v (falling back to direct gh)\n", err)
 		execDirect(cfg.GHPath, ghArgs)
 		return
