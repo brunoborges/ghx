@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/brunoborges/ghx/src/internal/allowlist"
 	"github.com/brunoborges/ghx/src/internal/client"
 	"github.com/brunoborges/ghx/src/internal/config"
 	execctx "github.com/brunoborges/ghx/src/internal/context"
@@ -49,6 +50,15 @@ func main() {
 
 	// Resolve real gh binary (lazy — only on execution path)
 	mustResolveGH(cfg)
+
+	// Short-circuit: passthrough commands (e.g. auth login, config, codespace) are
+	// interactive or otherwise unsuitable for the daemon. Execute gh directly so the
+	// user gets a full TTY and no IPC timeout can occur.
+	classifier := allowlist.NewClassifier(cfg.AdditionalCache)
+	if classifier.Classify(ghArgs).Type == allowlist.Passthrough {
+		execDirect(cfg.GHPath, ghArgs)
+		return
+	}
 
 	// Resolve execution context
 	ctx := execctx.Resolve(cfg.GHPath)
