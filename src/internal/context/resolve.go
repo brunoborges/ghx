@@ -90,8 +90,12 @@ func resolveTokenHash(ghPath, host string) string {
 	if token == "" {
 		return ""
 	}
+	return tokenHash(token)
+}
+
+func tokenHash(token string) string {
 	h := sha256.Sum256([]byte(token))
-	return fmt.Sprintf("%x", h[:8]) // first 8 bytes is enough for keying
+	return fmt.Sprintf("%x", h[:])
 }
 
 // CacheKey builds a deterministic cache key from the execution context and command args.

@@ -9,6 +9,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"time"
+
+	"github.com/brunoborges/ghx/src/internal/authenv"
 )
 
 // Result holds the output of a gh command execution.
@@ -21,10 +23,11 @@ type Result struct {
 
 // Execute runs a gh command with the given arguments and returns its output.
 // If workDir is non-empty and absolute, the command runs in that directory.
-func Execute(ctx context.Context, ghPath string, args []string, workDir string) *Result {
+func Execute(ctx context.Context, ghPath string, args []string, workDir string, env authenv.Environment) *Result {
 	start := time.Now()
 
 	cmd := exec.CommandContext(ctx, ghPath, args...)
+	cmd.Env = authenv.Apply(os.Environ(), env)
 	if workDir != "" && filepath.IsAbs(workDir) {
 		cmd.Dir = workDir
 	}
