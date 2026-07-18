@@ -69,7 +69,9 @@ func main() {
 	cl := client.New(cfg.SocketPath)
 	if ready, err := ensureDaemon(cfg, cl); !ready {
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "ghx: %v (falling back to direct gh)\n", err)
+			fmt.Fprintf(os.Stderr, "ghx: warning: %v (bypassing cache)\n", err)
+		} else {
+			fmt.Fprintf(os.Stderr, "ghx: warning: daemon not running, bypassing cache (start with: ghx xdaemon start)\n")
 		}
 		execDirect(cfg.GHPath, ghArgs)
 		return
@@ -99,7 +101,7 @@ func main() {
 			fmt.Fprintf(os.Stderr, "ghx: not falling back — command may have already been executed by the daemon\n")
 			os.Exit(1)
 		}
-		fmt.Fprintf(os.Stderr, "ghx: daemon error: %v (falling back to direct gh)\n", err)
+		fmt.Fprintf(os.Stderr, "ghx: warning: daemon error: %v (bypassing cache)\n", err)
 		execDirect(cfg.GHPath, ghArgs)
 		return
 	}

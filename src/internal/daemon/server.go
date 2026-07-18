@@ -66,6 +66,12 @@ func (s *Server) Run() error {
 		return fmt.Errorf("create socket dir: %w", err)
 	}
 
+	// Kill any previously running instance before touching the socket, so that
+	// two daemons cannot fight over the same path and corrupt client writes.
+	if err := ensureSingleInstance(s.cfg.PIDFile); err != nil {
+		log.Printf("ghxd: single-instance check: %v (proceeding anyway)", err)
+	}
+
 	// Remove stale socket (no-op on Windows)
 	removeStaleSocket(s.cfg.SocketPath)
 

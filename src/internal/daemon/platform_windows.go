@@ -18,3 +18,7 @@ func setSocketPermissions(_ string) error { return nil }
 func notifyShutdownSignals(ch chan<- os.Signal) {
 	signal.Notify(ch, os.Interrupt)
 }
+
+// ensureSingleInstance is a no-op on Windows; named pipes prevent multiple
+// listeners on the same path at the OS level.
+func ensureSingleInstance(_ string) error { return nil }
