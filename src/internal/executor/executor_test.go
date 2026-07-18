@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -27,12 +26,16 @@ func TestExecute_WorkDir(t *testing.T) {
 		t.Fatalf("expected exit code 0, got %d: %s", result.ExitCode, result.Stderr)
 	}
 	got := strings.TrimSpace(string(result.Stdout))
-	want, err := filepath.EvalSymlinks(dir)
+	gotInfo, err := os.Stat(got)
 	if err != nil {
-		t.Fatalf("resolve workdir: %v", err)
+		t.Fatalf("stat reported workdir %q: %v", got, err)
 	}
-	if got != want {
-		t.Errorf("expected workdir %q, got %q", want, got)
+	wantInfo, err := os.Stat(dir)
+	if err != nil {
+		t.Fatalf("stat expected workdir %q: %v", dir, err)
+	}
+	if !os.SameFile(gotInfo, wantInfo) {
+		t.Errorf("expected workdir %q, got %q", dir, got)
 	}
 }
 
