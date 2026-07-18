@@ -34,8 +34,10 @@ func notifyShutdownSignals(ch chan<- os.Signal) {
 func ensureSingleInstance(pidFile string) error {
 	data, err := os.ReadFile(pidFile)
 	if err != nil {
-		// No PID file or unreadable — nothing to do.
-		return nil
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
 	}
 
 	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))

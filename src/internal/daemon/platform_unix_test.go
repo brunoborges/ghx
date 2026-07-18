@@ -24,9 +24,8 @@ func TestEnsureSingleInstance_NoPIDFile(t *testing.T) {
 // TestEnsureSingleInstance_DeadPID verifies that ensureSingleInstance is a
 // no-op when the PID file contains a PID that is no longer alive.
 func TestEnsureSingleInstance_DeadPID(t *testing.T) {
-	// PID 1 is always alive (init/systemd) on Linux, but we need a dead PID.
-	// Use a known-unused high PID that is virtually guaranteed to be unoccupied.
-	// We write it and verify ensureSingleInstance does not return an error.
+	// PID 1 is always alive (init/systemd) on Linux, but we need a PID that is no longer alive.
+	// Use the PID of a short-lived subprocess that has already exited.
 	dir := t.TempDir()
 	pidFile := filepath.Join(dir, "ghxd.pid")
 
