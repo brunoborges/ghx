@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/brunoborges/ghx/src/internal/authenv"
 	execctx "github.com/brunoborges/ghx/src/internal/context"
 )
 
@@ -19,6 +20,10 @@ type Request struct {
 
 	// WorkDir is the client's working directory, so gh runs in the correct location.
 	WorkDir string `json:"work_dir,omitempty"`
+
+	// AuthEnv is the client's current GitHub CLI authentication environment.
+	// It is used only for subprocess execution and is never logged or persisted.
+	AuthEnv authenv.Environment `json:"auth_env,omitempty"`
 
 	// NoCache skips cache lookup for this request.
 	NoCache bool `json:"no_cache,omitempty"`

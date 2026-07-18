@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/brunoborges/ghx/src/internal/allowlist"
+	"github.com/brunoborges/ghx/src/internal/authenv"
 	"github.com/brunoborges/ghx/src/internal/client"
 	"github.com/brunoborges/ghx/src/internal/config"
 	execctx "github.com/brunoborges/ghx/src/internal/context"
@@ -81,6 +82,7 @@ func main() {
 		Args:        ghArgs,
 		Context:     ctx,
 		WorkDir:     workDir,
+		AuthEnv:     authenv.Capture(),
 		NoCache:     noCache,
 		TTLOverride: ttlOverride,
 	}

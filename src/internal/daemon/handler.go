@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/brunoborges/ghx/src/internal/allowlist"
+	"github.com/brunoborges/ghx/src/internal/authenv"
 	"github.com/brunoborges/ghx/src/internal/cache"
 	"github.com/brunoborges/ghx/src/internal/config"
 	execctx "github.com/brunoborges/ghx/src/internal/context"
@@ -32,6 +33,7 @@ type Handler struct {
 	// singleflight: one in-flight request per cache key
 	mu       sync.Mutex
 	inflight map[string]*call
+	execute  func(context.Context, string, []string, string, authenv.Environment) *executor.Result
 }
 
 type call struct {
@@ -46,6 +48,7 @@ func NewHandler(cfg *config.Config, c *cache.Cache, cl *allowlist.Classifier, s 
 		classifier: cl,
 		stats:      s,
 		inflight:   make(map[string]*call),
+		execute:    executor.Execute,
 	}
 	h.ghPath.Store(cfg.GHPath)
 	c.OnEvict(func(key string) {
@@ -65,14 +68,14 @@ func (h *Handler) SetGHPath(path string) {
 }
 
 // execGH runs gh and retries once with a re-resolved path if the binary is not found.
-func (h *Handler) execGH(args []string, workDir string) *executor.Result {
+func (h *Handler) execGH(args []string, workDir string, env authenv.Environment) *executor.Result {
 	ghPath := h.GHPath()
 	if executor.IsBinaryNotFound(ghPath) {
 		if newPath := h.reResolveGHPath(); newPath != "" {
 			ghPath = newPath
 		}
 	}
-	return executor.Execute(context.Background(), ghPath, args, workDir)
+	return h.execute(context.Background(), ghPath, args, workDir, env)
 }
 
 // reResolveGHPath attempts to find a new gh binary and updates the stored path.
@@ -118,7 +121,7 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 
 	// Non-cacheable: execute directly via daemon (captures output)
 	if classification.Type == allowlist.Passthrough || req.NoCache {
-		result := h.execGH(req.Args, req.WorkDir)
+		result := h.execGH(req.Args, req.WorkDir, req.AuthEnv)
 		latency := time.Since(start).Seconds() * 1000
 		h.stats.Record(cmdKey, "", metrics.ResultPassthrough, latency)
 
@@ -131,7 +134,7 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 
 	// Mutation: execute directly, then invalidate
 	if classification.Type == allowlist.Mutation {
-		result := h.execGH(req.Args, req.WorkDir)
+		result := h.execGH(req.Args, req.WorkDir, req.AuthEnv)
 		latency := time.Since(start).Seconds() * 1000
 		h.stats.Record(cmdKey, "", metrics.ResultPassthrough, latency)
 
@@ -210,7 +213,7 @@ func (h *Handler) doSingleflight(key string, req *protocol.Request) (*executor.R
 	h.inflight[key] = c
 	h.mu.Unlock()
 
-	c.res = h.execGH(req.Args, req.WorkDir)
+	c.res = h.execGH(req.Args, req.WorkDir, req.AuthEnv)
 	c.wg.Done()
 
 	h.mu.Lock()
