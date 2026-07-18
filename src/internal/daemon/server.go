@@ -66,6 +66,11 @@ func (s *Server) Run() error {
 		return fmt.Errorf("create socket dir: %w", err)
 	}
 
+	// Ensure only one daemon owns the socket path to avoid corrupted IPC writes.
+	if err := ensureSingleInstance(s.cfg.PIDFile); err != nil {
+		return fmt.Errorf("single-instance check: %w", err)
+	}
+
 	// Remove stale socket (no-op on Windows)
 	removeStaleSocket(s.cfg.SocketPath)
 
