@@ -439,10 +439,13 @@ func handleGHStatus(cfg *config.Config) {
 
 	managed := ghcli.IsManagedGH(resolved)
 	source := "PATH"
-	if cfg.GHPath != "" && cfg.GHPath != "gh" {
-		source = "config (gh_path)"
-	} else if managed {
+	switch {
+	case managed:
 		source = "managed (~/.ghx/bin/gh)"
+	case cfg.GHPath != "" && cfg.GHPath != "gh" && resolved == cfg.GHPath:
+		source = "config (gh_path)"
+	case ghcli.IsPackageManagerGH(resolved):
+		source = "package manager (shadowed by the ghx shim)"
 	}
 
 	fmt.Printf("gh binary:  %s\n", resolved)
@@ -462,6 +465,19 @@ func handleGHStatus(cfg *config.Config) {
 			days := int(age.Hours() / 24)
 			fmt.Printf("installed:  %d days ago\n", days)
 		}
+	}
+
+	// Show other gh binaries that the shim would otherwise hide, so a newer
+	// package-manager install is visible at a glance.
+	for _, candidate := range ghcli.FindPackageManagerGHs() {
+		if candidate.Path == resolved {
+			continue
+		}
+		note := ""
+		if ver != "" && ghcli.CompareVersions(candidate.Version, ver) > 0 {
+			note = "  <- newer"
+		}
+		fmt.Printf("also found: %s (version %s)%s\n", candidate.Path, candidate.Version, note)
 	}
 }
 

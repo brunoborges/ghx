@@ -30,11 +30,18 @@ func ghBinaryName() string {
 //  2. PATH scan — search for a real gh in PATH, skipping ghx shims
 //  3. Managed location — ~/.ghx/bin/gh (previously downloaded)
 //  4. Auto-download — download from cli/cli releases to managed location
+//
+// Whenever resolution lands on the ghx-managed binary — which is what happens when the
+// ghx shim is installed as "gh" on PATH and shadows a package-manager install — the
+// well-known package-manager locations are probed and a newer gh there is preferred.
 func ResolveGHPath(cfgGHPath string) (string, error) {
 	// User explicitly configured a specific path
 	if cfgGHPath != "" && cfgGHPath != "gh" {
 		if _, err := exec.LookPath(cfgGHPath); err != nil {
 			return "", fmt.Errorf("configured gh_path %q not found: %w", cfgGHPath, err)
+		}
+		if IsManagedGH(cfgGHPath) {
+			return preferNewerGH(cfgGHPath), nil
 		}
 		return cfgGHPath, nil
 	}
@@ -47,7 +54,7 @@ func ResolveGHPath(cfgGHPath string) (string, error) {
 	// Check managed location
 	managed := ManagedGHPath()
 	if managed != "" && isExecutable(managed) {
-		return managed, nil
+		return preferNewerGH(managed), nil
 	}
 
 	// Auto-download
