@@ -241,3 +241,65 @@ func newTestHandler() *Handler {
 	cfg := &config.Config{GHPath: "gh", MaxCacheEntries: 100, TTL: 30 * time.Second}
 	return NewHandler(cfg, cache.New(100), allowlist.NewClassifier(nil), metrics.New())
 }
+
+func TestHandlerNoCacheMutationInvalidates(t *testing.T) {
+	for _, noCache := range []bool{false, true} {
+		t.Run(map[bool]string{false: "normal", true: "no-cache"}[noCache], func(t *testing.T) {
+			h := newTestHandler()
+			value := "before"
+			h.execute = func(_ context.Context, _ string, args []string, _ string, _ authenv.Environment) *executor.Result {
+				if args[1] == "edit" {
+					value = "after"
+				}
+				return &executor.Result{Stdout: []byte(value)}
+			}
+			ctx := execctx.ExecContext{Host: "github.com", Repo: "owner/repo"}
+			read := &protocol.Request{Type: protocol.TypeExec, Args: []string{"pr", "view", "1"}, Context: ctx}
+			h.Handle(read)
+			if !h.Handle(read).Cached {
+				t.Fatal("read did not warm the cache")
+			}
+			h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"pr", "edit", "1"}, Context: ctx, NoCache: noCache})
+			got := h.Handle(read)
+			if got.Cached || string(got.Stdout) != "after" {
+				t.Fatalf("read after mutation = %+v", got)
+			}
+		})
+	}
+}
+
+func TestHandlerAPIMutationsAreNeverCached(t *testing.T) {
+	h := newTestHandler()
+	calls := 0
+	h.execute = func(_ context.Context, _ string, _ []string, _ string, _ authenv.Environment) *executor.Result {
+		calls++
+		return &executor.Result{}
+	}
+	req := &protocol.Request{Type: protocol.TypeExec, Args: []string{"api", "repos/owner/repo/issues", "-f", "title=hello"}}
+	h.Handle(req)
+	h.Handle(req)
+	if calls != 2 || h.cache.Size() != 0 {
+		t.Fatalf("calls = %d, cache size = %d", calls, h.cache.Size())
+	}
+}
+
+func TestHandlerScopedFlush(t *testing.T) {
+	h := newTestHandler()
+	for _, entry := range []cache.Entry{
+		{Key: "target", Host: "github.com", Repo: "owner/repo", Resource: allowlist.ResourcePR},
+		{Key: "other resource", Host: "github.com", Repo: "owner/repo", Resource: allowlist.ResourceIssue},
+		{Key: "other repo", Host: "github.com", Repo: "owner/other", Resource: allowlist.ResourcePR},
+	} {
+		entry.TTL, entry.CachedAt = time.Minute, time.Now()
+		h.cache.Set(&entry)
+	}
+	h.Handle(&protocol.Request{Type: protocol.TypeFlush, Resource: allowlist.ResourcePR,
+		Context: execctx.ExecContext{Host: "github.com", Repo: "owner/repo"}})
+	if h.cache.Get("target") != nil || h.cache.Size() != 2 {
+		t.Fatalf("scoped flush left keys %v", h.cache.Keys())
+	}
+	h.Handle(&protocol.Request{Type: protocol.TypeFlush})
+	if h.cache.Size() != 0 {
+		t.Fatal("legacy/global flush did not clear cache")
+	}
+}

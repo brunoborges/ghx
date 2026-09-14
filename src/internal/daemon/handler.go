@@ -119,19 +119,6 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 		cmdKey = sanitizeCmdKey(req.Args)
 	}
 
-	// Non-cacheable: execute directly via daemon (captures output)
-	if classification.Type == allowlist.Passthrough || req.NoCache {
-		result := h.execGH(req.Args, req.WorkDir, req.AuthEnv)
-		latency := time.Since(start).Seconds() * 1000
-		h.stats.Record(cmdKey, "", metrics.ResultPassthrough, latency)
-
-		return &protocol.Response{
-			Stdout:   result.Stdout,
-			Stderr:   result.Stderr,
-			ExitCode: result.ExitCode,
-		}
-	}
-
 	// Mutation: execute directly, then invalidate
 	if classification.Type == allowlist.Mutation {
 		result := h.execGH(req.Args, req.WorkDir, req.AuthEnv)
@@ -142,6 +129,19 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 			count := h.cache.InvalidateNamespace(req.Context.Host, req.Context.Repo, classification.Resource)
 			h.stats.RecordInvalidation(count)
 		}
+
+		return &protocol.Response{
+			Stdout:   result.Stdout,
+			Stderr:   result.Stderr,
+			ExitCode: result.ExitCode,
+		}
+	}
+
+	// Non-cacheable: execute directly via daemon (captures output)
+	if classification.Type == allowlist.Passthrough || req.NoCache {
+		result := h.execGH(req.Args, req.WorkDir, req.AuthEnv)
+		latency := time.Since(start).Seconds() * 1000
+		h.stats.Record(cmdKey, "", metrics.ResultPassthrough, latency)
 
 		return &protocol.Response{
 			Stdout:   result.Stdout,
@@ -230,7 +230,13 @@ func (h *Handler) handleStats() *protocol.Response {
 }
 
 func (h *Handler) handleFlush(req *protocol.Request) *protocol.Response {
-	count := h.cache.Flush()
+	var count int
+	if req.Resource == allowlist.ResourceUnknown {
+		count = h.cache.Flush()
+	} else {
+		count = h.cache.InvalidateNamespace(req.Context.Host, req.Context.Repo, req.Resource)
+		h.stats.RecordInvalidation(count)
+	}
 	msg := []byte(fmt.Sprintf("flushed %d entries\n", count))
 	return &protocol.Response{Stdout: msg}
 }

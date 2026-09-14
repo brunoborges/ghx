@@ -285,6 +285,8 @@ GHX_NO_CACHE=1 ghx pr list ... # Same via env var
 GHX_TTL=60 ghx pr list ...     # Same via env var
 ```
 
+Environment overrides work without a config file and take precedence over YAML values.
+
 ## Daemon Management
 
 ```bash
@@ -372,7 +374,9 @@ Only explicitly allowlisted read-only commands are cached:
 | `gh issue create/edit/delete/close` | ❌ (mutation → invalidates issue cache) |
 | `gh auth/config/codespace/secret` | ❌ (always passthrough) |
 
-Mutations automatically invalidate related cache entries. For example, `gh pr merge 42` flushes all cached PR entries for that repo.
+Mutations run in the invoking client, preserving stdin, stdout, stderr, and terminal prompts. After the command exits, ghx invalidates related cache entries, including when `--no-cache` is used or the command fails after a partial write. For example, `ghx pr merge 42` flushes all cached PR entries for that repo. A mutation never starts a daemon solely to invalidate an empty cache. Older daemons safely flush the whole cache when receiving the scoped invalidation request.
+
+API requests are cached only when their effective method is GET. Fields imply POST unless the method is explicitly GET; GraphQL, input bodies, file-backed fields, and unknown options bypass caching. These requests are never coalesced. An invalidation failure prints a warning and preserves the mutation's exit code; the mutation is never retried.
 
 ### Custom Commands
 

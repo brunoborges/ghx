@@ -214,22 +214,85 @@ func (c *Classifier) Classify(args []string) Classification {
 }
 
 func (c *Classifier) classifyAPI(args []string) Classification {
-	// gh api [flags] <endpoint>
-	// Only cache GET requests (default method is GET)
-	method := "GET"
-	for i, arg := range args {
-		if (arg == "-X" || arg == "--method") && i+1 < len(args) {
-			method = strings.ToUpper(args[i+1])
+	mutation := Classification{Type: Mutation, Resource: ResourceAPI}
+	method, endpoint := "GET", ""
+	explicitMethod, hasFields := false, false
+	for i := 1; i < len(args); i++ {
+		arg := args[i]
+		if arg == "--" {
+			if endpoint != "" || i+2 != len(args) {
+				return mutation
+			}
+			endpoint = args[i+1]
+			break
+		}
+		if !strings.HasPrefix(arg, "-") || arg == "-" {
+			if endpoint != "" {
+				return mutation
+			}
+			endpoint = arg
+			continue
+		}
+
+		// Consume flag values so a header/filter/body containing "-X" cannot
+		// change the inferred method. Unknown options stay out of the cache.
+		long := strings.HasPrefix(arg, "--")
+		options := strings.TrimPrefix(arg, "-")
+		if long {
+			options = strings.TrimPrefix(options, "-")
+		}
+		for options != "" {
+			var name, value string
+			var attached bool
+			if long {
+				name, value, attached = strings.Cut(options, "=")
+				options = ""
+			} else {
+				name, options = options[:1], options[1:]
+			}
+			switch name {
+			case "i", "include", "paginate", "silent", "slurp", "verbose", "allow-escape-sequences":
+				continue
+			case "X", "method", "f", "raw-field", "F", "field", "input",
+				"H", "header", "hostname", "p", "preview", "q", "jq", "t", "template", "cache":
+				if !long && options != "" {
+					value, attached = strings.TrimPrefix(options, "="), true
+					options = ""
+				}
+				if !attached {
+					i++
+					if i == len(args) {
+						return mutation
+					}
+					value = args[i]
+				}
+			default:
+				return mutation
+			}
+			switch name {
+			case "X", "method":
+				method, explicitMethod = value, true
+			case "f", "raw-field", "F", "field":
+				hasFields = true
+				if name == "F" || name == "field" {
+					_, fieldValue, _ := strings.Cut(value, "=")
+					if strings.HasPrefix(fieldValue, "@") {
+						return mutation // File/stdin contents are not part of the cache key.
+					}
+				}
+			case "input":
+				return mutation // Body contents can change without changing argv.
+			}
 		}
 	}
-
-	if method != "GET" {
-		return Classification{Type: Mutation, Resource: ResourceAPI}
+	if endpoint == "" || endpoint == "graphql" {
+		return mutation // GraphQL requires operation-aware classification before caching.
 	}
-
-	return Classification{
-		Type:     Cacheable,
-		Resource: ResourceAPI,
-		CmdKey:   "api_get",
+	if hasFields && !explicitMethod {
+		method = "POST"
 	}
+	if !strings.EqualFold(method, "GET") {
+		return mutation
+	}
+	return Classification{Type: Cacheable, Resource: ResourceAPI, CmdKey: "api_get"}
 }

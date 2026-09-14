@@ -133,3 +133,44 @@ func TestAdditionalCacheable(t *testing.T) {
 		t.Errorf("additional cacheable 'variable list': cmdKey=%s, want variable_list", cl.CmdKey)
 	}
 }
+
+func TestAPIEffectiveMethod(t *testing.T) {
+	c := NewClassifier(nil)
+	tests := []struct {
+		name string
+		args []string
+		want CommandType
+	}{
+		{"implicit raw field POST", []string{"repos/owner/repo/issues", "-f", "title=hello"}, Mutation},
+		{"implicit typed field POST", []string{"repos/owner/repo/issues", "--field=title=hello"}, Mutation},
+		{"attached method", []string{"repos/owner/repo/issues", "--method=POST"}, Mutation},
+		{"short attached method", []string{"repos/owner/repo/issues", "-XPOST"}, Mutation},
+		{"short equals method", []string{"repos/owner/repo/issues", "-X=POST"}, Mutation},
+		{"combined short flags", []string{"-iXPOST", "repos/owner/repo/issues"}, Mutation},
+		{"input file", []string{"repos/owner/repo/issues", "--input", "body.json"}, Mutation},
+		{"GET input file", []string{"repos/owner/repo/issues", "-XGET", "--input=body.json"}, Mutation},
+		{"GET file field", []string{"repos/owner/repo/issues", "-XGET", "-Fquery=@query.txt"}, Mutation},
+		{"GET stdin field", []string{"repos/owner/repo/issues", "-XGET", "-Fquery=@-"}, Mutation},
+		{"GraphQL mutation", []string{"graphql", "-f", "query=mutation { example }"}, Mutation},
+		{"GraphQL explicit GET", []string{"graphql", "-XGET"}, Mutation},
+		{"explicit GET fields", []string{"search/issues", "-f", "q=hello", "--method=GET"}, Cacheable},
+		{"typed GET fields", []string{"search/issues", "-X", "GET", "-F", "page=1"}, Cacheable},
+		{"raw at-sign field", []string{"search/issues", "-XGET", "-f", "q=@name"}, Cacheable},
+		{"combined GET flags", []string{"-iXGET", "repos/owner/repo"}, Cacheable},
+		{"last method wins", []string{"repos/owner/repo", "-XPOST", "--method", "GET"}, Cacheable},
+		{"method-like header", []string{"repos/owner/repo", "-H", "-X", "--jq", "POST"}, Cacheable},
+		{"method-like input value", []string{"repos/owner/repo", "--input", "-X"}, Mutation},
+		{"missing value", []string{"repos/owner/repo", "--method"}, Mutation},
+		{"unknown option", []string{"repos/owner/repo", "--future-option"}, Mutation},
+		{"terminator", []string{"-XGET", "--", "repos/owner/repo"}, Cacheable},
+		{"endpoint after terminator", []string{"--", "--method=POST"}, Cacheable},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := c.Classify(append([]string{"api"}, tt.args...))
+			if got.Type != tt.want {
+				t.Fatalf("Classify(%q) = %+v, want %v", tt.args, got, tt.want)
+			}
+		})
+	}
+}

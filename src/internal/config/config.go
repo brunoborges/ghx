@@ -42,15 +42,13 @@ func Load() (*Config, error) {
 	ghxDir := defaultGHXDir()
 	configPath := filepath.Join(ghxDir, "config.yaml")
 	data, err := os.ReadFile(configPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return cfg, nil
-		}
+	if err != nil && !os.IsNotExist(err) {
 		return cfg, err
 	}
-
-	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return cfg, err
+	if err == nil {
+		if err := yaml.Unmarshal(data, cfg); err != nil {
+			return cfg, err
+		}
 	}
 
 	// Apply env var overrides

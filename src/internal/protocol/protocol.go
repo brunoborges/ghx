@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 
+	"github.com/brunoborges/ghx/src/internal/allowlist"
 	"github.com/brunoborges/ghx/src/internal/authenv"
 	execctx "github.com/brunoborges/ghx/src/internal/context"
 )
@@ -33,6 +34,10 @@ type Request struct {
 
 	// Type distinguishes regular gh commands from control commands.
 	Type RequestType `json:"type"`
+
+	// Resource scopes a flush to Context.Host/Repo. Older daemons ignore it
+	// and safely flush the whole cache; mutation payloads never cross IPC.
+	Resource allowlist.ResourceType `json:"resource,omitempty"`
 }
 
 type RequestType string
