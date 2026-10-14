@@ -120,7 +120,16 @@ func (c *Cache) Set(entry *Entry) {
 		c.evictOldest()
 	}
 
-	elem := c.order.PushFront(&storedEntry{entry: entry, bytes: bytes})
+	stored := *entry
+	if entry.Stdout != nil {
+		stored.Stdout = make([]byte, len(entry.Stdout))
+		copy(stored.Stdout, entry.Stdout)
+	}
+	if entry.Stderr != nil {
+		stored.Stderr = make([]byte, len(entry.Stderr))
+		copy(stored.Stderr, entry.Stderr)
+	}
+	elem := c.order.PushFront(&storedEntry{entry: &stored, bytes: bytes})
 	c.items[entry.Key] = elem
 	c.bytes += bytes
 }
