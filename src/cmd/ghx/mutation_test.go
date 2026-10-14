@@ -160,6 +160,7 @@ func TestMainMutationUsesNativeStdinAndFlush(t *testing.T) {
 			cmd.Dir = dir
 			cmd.Env = []string{
 				"PATH=" + dir, "HOME=" + dir, "USERPROFILE=" + dir, "LOCALAPPDATA=" + dir,
+				"GOCOVERDIR=" + t.TempDir(),
 				"GHX_GH_PATH=" + os.Args[0], "GHX_SOCKET=" + address,
 				"GH_REPO=owner/repo", "GHX_TEST_CLI_HELPER=1",
 				// A resolver regression must fail without downloading a real gh binary.
