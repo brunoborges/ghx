@@ -135,6 +135,71 @@ func TestByteBudgetReplacement(t *testing.T) {
 	}
 }
 
+func TestByteBudgetOwnsResponseBuffers(t *testing.T) {
+	c := NewWithByteLimit(1, 6)
+	entry := &Entry{
+		Key:      "response",
+		Stdout:   make([]byte, 3, 1<<20),
+		Stderr:   make([]byte, 3, 1<<20),
+		CachedAt: time.Now(),
+		TTL:      time.Minute,
+	}
+	copy(entry.Stdout, "out")
+	copy(entry.Stderr, "err")
+	c.Set(entry)
+
+	got := c.Get(entry.Key)
+	if got == nil {
+		t.Fatal("response at the byte limit must be retained")
+	}
+	if got == entry {
+		t.Fatal("cache must own a copy of the entry")
+	}
+	for name, data := range map[string][]byte{"stdout": got.Stdout, "stderr": got.Stderr} {
+		if cap(data) != len(data) {
+			t.Errorf("%s capacity = %d, want %d; cache must not retain oversized backing arrays", name, cap(data), len(data))
+		}
+	}
+
+	entry.Stdout[0] = 'X'
+	entry.Stderr[0] = 'Y'
+	if string(got.Stdout) != "out" || string(got.Stderr) != "err" {
+		t.Fatalf("cached buffers alias the input: stdout = %q, stderr = %q", got.Stdout, got.Stderr)
+	}
+	if usage := c.Usage(); usage.Bytes != 6 || usage.Rejected != 0 {
+		t.Fatalf("usage = %+v, want 6 bytes and no rejections", usage)
+	}
+}
+
+func TestByteBudgetEvictsMultipleEntries(t *testing.T) {
+	c := NewWithByteLimit(10, 8)
+	for _, key := range []string{"a", "b", "c"} {
+		c.Set(budgetEntry(t, key, 2))
+	}
+	c.Set(budgetEntry(t, "large", 7))
+	for _, key := range []string{"a", "b", "c"} {
+		if c.Get(key) != nil {
+			t.Errorf("%q must be evicted to fit the larger response", key)
+		}
+	}
+	if c.Get("large") == nil || c.Size() != 1 || c.Usage().Bytes != 7 {
+		t.Fatalf("size = %d, usage = %+v; want one entry using 7 bytes", c.Size(), c.Usage())
+	}
+}
+
+func TestEntryLimitReleasesResponseBytes(t *testing.T) {
+	c := NewWithByteLimit(2, 100)
+	c.Set(budgetEntry(t, "a", 3))
+	c.Set(budgetEntry(t, "b", 2))
+	c.Set(budgetEntry(t, "c", 4))
+	if c.Get("a") != nil || c.Get("b") == nil || c.Get("c") == nil {
+		t.Fatal("entry pressure must evict only the least recently used entry")
+	}
+	if usage := c.Usage(); usage.Bytes != 6 || usage.Rejected != 0 {
+		t.Fatalf("usage = %+v, want 6 bytes and no rejections", usage)
+	}
+}
+
 func TestByteBudgetCountsStderrAndReleases(t *testing.T) {
 	c := NewWithByteLimit(2, 6)
 	a := budgetEntry(t, "a", 3)
@@ -193,5 +258,75 @@ func TestByteBudgetConcurrent(t *testing.T) {
 	wg.Wait()
 	if c.Usage().Bytes != 2 || c.Size() != 1 {
 		t.Fatal("concurrent replacement must preserve accounting")
+	}
+}
+
+func TestByteBudgetConcurrentEviction(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		maxBytes int64
+	}{
+		{name: "entry pressure", maxBytes: 100},
+		{name: "byte pressure", maxBytes: 4},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := NewWithByteLimit(3, tt.maxBytes)
+			var entries []*Entry
+			for i, key := range []string{"a", "b", "c", "d", "e", "f", "g", "h"} {
+				entry := budgetEntry(t, key, i%3+1)
+				entry.Host = "github.com"
+				entry.Repo = "o/r"
+				entry.Resource = allowlist.ResourcePR
+				if i%2 == 0 {
+					entry.Resource = allowlist.ResourceIssue
+				}
+				entries = append(entries, entry)
+			}
+
+			start := make(chan struct{})
+			var wg sync.WaitGroup
+			for worker := range len(entries) {
+				wg.Go(func() {
+					<-start
+					for i := range 100 {
+						entry := entries[(worker+i)%len(entries)]
+						c.Set(entry)
+						c.Get(entry.Key)
+						if i%7 == 0 {
+							c.InvalidateNamespace("github.com", "o/r", allowlist.ResourcePR)
+						}
+						if i%13 == 0 {
+							c.Flush()
+						}
+						if usage := c.Usage(); usage.Bytes < 0 || usage.Bytes > tt.maxBytes || usage.Rejected != 0 {
+							t.Errorf("usage outside the budget: %+v", usage)
+							return
+						}
+						if size := c.Size(); size < 0 || size > 3 {
+							t.Errorf("size = %d, want at most 3 entries", size)
+							return
+						}
+					}
+				})
+			}
+			close(start)
+			wg.Wait()
+
+			var retained int64
+			keys := c.Keys()
+			for _, key := range keys {
+				entry := c.Get(key)
+				if entry == nil {
+					t.Fatalf("retained key %q has no entry", key)
+				}
+				retained += int64(len(entry.Stdout)) + int64(len(entry.Stderr))
+			}
+			if usage := c.Usage(); usage.Bytes != retained {
+				t.Fatalf("accounted bytes = %d, retained payload bytes = %d", usage.Bytes, retained)
+			}
+			if c.Size() != len(keys) {
+				t.Fatalf("size = %d, want %d retained keys", c.Size(), len(keys))
+			}
+		})
 	}
 }

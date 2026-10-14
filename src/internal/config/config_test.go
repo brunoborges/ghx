@@ -1,6 +1,8 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -66,6 +68,45 @@ func TestLoadReturnsDefaults(t *testing.T) {
 	}
 	if cfg.GHPath == "" {
 		t.Error("GHPath should not be empty")
+	}
+}
+
+func TestLoadCacheByteBudget(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		yaml        string
+		wantBytes   int64
+		wantEntries int
+	}{
+		{name: "missing config", wantBytes: 64 << 20, wantEntries: 1000},
+		{name: "legacy config", yaml: "max_cache_entries: 7\n", wantBytes: 64 << 20, wantEntries: 7},
+		{name: "custom limit", yaml: "max_cache_entries: 7\nmax_cache_bytes: 4096\n", wantBytes: 4096, wantEntries: 7},
+		{name: "zero disables storage", yaml: "max_cache_bytes: 0\n", wantBytes: 0, wantEntries: 1000},
+		{name: "negative disables storage", yaml: "max_cache_bytes: -1\n", wantBytes: -1, wantEntries: 1000},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			for _, name := range []string{"HOME", "USERPROFILE", "LOCALAPPDATA"} {
+				t.Setenv(name, home)
+			}
+			if tt.yaml != "" {
+				dir := defaultGHXDir()
+				if err := os.MkdirAll(dir, 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(tt.yaml), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.MaxCacheBytes != tt.wantBytes || cfg.MaxCacheEntries != tt.wantEntries {
+				t.Fatalf("limits = (%d bytes, %d entries), want (%d bytes, %d entries)",
+					cfg.MaxCacheBytes, cfg.MaxCacheEntries, tt.wantBytes, tt.wantEntries)
+			}
+		})
 	}
 }
 

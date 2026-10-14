@@ -181,6 +181,19 @@ func (s *Server) handleConn(conn net.Conn) {
 }
 
 func (s *Server) startHTTP() {
+	s.httpSrv = &http.Server{
+		Addr:    fmt.Sprintf("127.0.0.1:%d", s.cfg.DashboardPort),
+		Handler: s.httpHandler(),
+	}
+
+	go func() {
+		if err := s.httpSrv.ListenAndServe(); err != http.ErrServerClosed {
+			log.Printf("HTTP server error: %v", err)
+		}
+	}()
+}
+
+func (s *Server) httpHandler() http.Handler {
 	mux := http.NewServeMux()
 
 	// Dashboard
@@ -250,16 +263,7 @@ func (s *Server) startHTTP() {
 		}()
 	})
 
-	s.httpSrv = &http.Server{
-		Addr:    fmt.Sprintf("127.0.0.1:%d", s.cfg.DashboardPort),
-		Handler: mux,
-	}
-
-	go func() {
-		if err := s.httpSrv.ListenAndServe(); err != http.ErrServerClosed {
-			log.Printf("HTTP server error: %v", err)
-		}
-	}()
+	return mux
 }
 
 // Shutdown gracefully stops the daemon.
