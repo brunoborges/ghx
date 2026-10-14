@@ -136,7 +136,7 @@ All three agents get the same response
 
 ### Cache Invalidation
 
-**Coarse-grained, namespace-based invalidation.** After any mutating command passes through the daemon, all cached entries for the same `{host, repo, resource_type}` namespace are invalidated.
+**Coarse-grained, namespace-based invalidation.** After any mutating command exits in the invoking client, a flush request invalidates all cached entries for the same `{host, repo, resource_type}` namespace.
 
 Resource types: `pr`, `issue`, `run`, `workflow`, `release`, `label`, `repo`, `api`.
 

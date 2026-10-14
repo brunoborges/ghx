@@ -57,13 +57,20 @@ func main() {
 	// interactive or otherwise unsuitable for the daemon. Execute gh directly so the
 	// user gets a full TTY and no IPC timeout can occur.
 	classifier := allowlist.NewClassifier(cfg.AdditionalCache)
-	if classifier.Classify(ghArgs).Type == allowlist.Passthrough {
+	classification := classifier.Classify(ghArgs)
+	if classification.Type == allowlist.Passthrough {
 		execDirect(cfg.GHPath, ghArgs)
 		return
 	}
 
 	// Resolve execution context
 	ctx := execctx.Resolve(cfg.GHPath)
+	if classification.Type == allowlist.Mutation {
+		cmd := exec.Command(cfg.GHPath, ghArgs...)
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+		req := &protocol.Request{Type: protocol.TypeFlush, Context: ctx, Resource: classification.Resource}
+		os.Exit(runMutation(cmd, req, client.New(cfg.SocketPath).Send))
+	}
 
 	// Connect to daemon, auto-starting if needed
 	cl := client.New(cfg.SocketPath)
@@ -329,16 +336,19 @@ func handleCache(cfg *config.Config, args []string) {
 
 func printFormattedStats(data []byte) {
 	var stats struct {
-		Uptime       string                     `json:"uptime"`
-		Total        int64                      `json:"total"`
-		Hits         int64                      `json:"hits"`
-		Misses       int64                      `json:"misses"`
-		Passthrough  int64                      `json:"passthrough"`
-		Coalesced    int64                      `json:"coalesced"`
-		HitRate      float64                    `json:"hit_rate"`
-		CacheSize    int                        `json:"cache_size"`
-		MaxCacheSize int                        `json:"max_cache_size"`
-		Commands     map[string]json.RawMessage `json:"commands"`
+		Uptime        string                     `json:"uptime"`
+		Total         int64                      `json:"total"`
+		Hits          int64                      `json:"hits"`
+		Misses        int64                      `json:"misses"`
+		Passthrough   int64                      `json:"passthrough"`
+		Coalesced     int64                      `json:"coalesced"`
+		HitRate       float64                    `json:"hit_rate"`
+		CacheSize     int                        `json:"cache_size"`
+		CacheBytes    int64                      `json:"cache_bytes"`
+		MaxCacheBytes int64                      `json:"max_cache_bytes"`
+		CacheRejected int64                      `json:"cache_rejected"`
+		MaxCacheSize  int                        `json:"max_cache_size"`
+		Commands      map[string]json.RawMessage `json:"commands"`
 	}
 	if err := json.Unmarshal(data, &stats); err != nil {
 		os.Stdout.Write(data)
@@ -352,6 +362,8 @@ func printFormattedStats(data []byte) {
 	fmt.Printf("Passthrough:     %d\n", stats.Passthrough)
 	fmt.Printf("Coalesced:       %d\n", stats.Coalesced)
 	fmt.Printf("Cache Size:      %d / %d entries\n", stats.CacheSize, stats.MaxCacheSize)
+	fmt.Printf("Cache Bytes:     %d / %d bytes\n", stats.CacheBytes, stats.MaxCacheBytes)
+	fmt.Printf("Cache Rejected:  %d\n", stats.CacheRejected)
 
 	if len(stats.Commands) > 0 {
 		fmt.Println("\nTop Commands:")

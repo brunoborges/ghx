@@ -11,6 +11,7 @@ import (
 type Config struct {
 	TTL             time.Duration            `yaml:"ttl"`
 	TTLOverrides    map[string]time.Duration `yaml:"ttl_overrides"`
+	MaxCacheBytes   int64                    `yaml:"max_cache_bytes"`
 	MaxCacheEntries int                      `yaml:"max_cache_entries"`
 	SocketPath      string                   `yaml:"socket_path"`
 	PIDFile         string                   `yaml:"pid_file"`
@@ -27,6 +28,7 @@ func DefaultConfig() *Config {
 		TTL:             30 * time.Second,
 		TTLOverrides:    make(map[string]time.Duration),
 		MaxCacheEntries: 1000,
+		MaxCacheBytes:   64 << 20,
 		SocketPath:      defaultSocketPath(ghxDir),
 		PIDFile:         filepath.Join(ghxDir, "ghxd.pid"),
 		AutoStart:       true,
@@ -42,15 +44,13 @@ func Load() (*Config, error) {
 	ghxDir := defaultGHXDir()
 	configPath := filepath.Join(ghxDir, "config.yaml")
 	data, err := os.ReadFile(configPath)
-	if err != nil {
-		if os.IsNotExist(err) {
-			return cfg, nil
-		}
+	if err != nil && !os.IsNotExist(err) {
 		return cfg, err
 	}
-
-	if err := yaml.Unmarshal(data, cfg); err != nil {
-		return cfg, err
+	if err == nil {
+		if err := yaml.Unmarshal(data, cfg); err != nil {
+			return cfg, err
+		}
 	}
 
 	// Apply env var overrides

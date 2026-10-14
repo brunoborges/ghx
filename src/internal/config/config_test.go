@@ -1,9 +1,12 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDefaultConfigSocketPath(t *testing.T) {
@@ -69,6 +72,45 @@ func TestLoadReturnsDefaults(t *testing.T) {
 	}
 }
 
+func TestLoadCacheByteBudget(t *testing.T) {
+	for _, tt := range []struct {
+		name        string
+		yaml        string
+		wantBytes   int64
+		wantEntries int
+	}{
+		{name: "missing config", wantBytes: 64 << 20, wantEntries: 1000},
+		{name: "legacy config", yaml: "max_cache_entries: 7\n", wantBytes: 64 << 20, wantEntries: 7},
+		{name: "custom limit", yaml: "max_cache_entries: 7\nmax_cache_bytes: 4096\n", wantBytes: 4096, wantEntries: 7},
+		{name: "zero disables storage", yaml: "max_cache_bytes: 0\n", wantBytes: 0, wantEntries: 1000},
+		{name: "negative disables storage", yaml: "max_cache_bytes: -1\n", wantBytes: -1, wantEntries: 1000},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			home := t.TempDir()
+			for _, name := range []string{"HOME", "USERPROFILE", "LOCALAPPDATA"} {
+				t.Setenv(name, home)
+			}
+			if tt.yaml != "" {
+				dir := defaultGHXDir()
+				if err := os.MkdirAll(dir, 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(tt.yaml), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.MaxCacheBytes != tt.wantBytes || cfg.MaxCacheEntries != tt.wantEntries {
+				t.Fatalf("limits = (%d bytes, %d entries), want (%d bytes, %d entries)",
+					cfg.MaxCacheBytes, cfg.MaxCacheEntries, tt.wantBytes, tt.wantEntries)
+			}
+		})
+	}
+}
+
 func TestCommandTTL(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.TTLOverrides["pr_list"] = cfg.TTL * 2
@@ -78,5 +120,36 @@ func TestCommandTTL(t *testing.T) {
 	}
 	if got := cfg.CommandTTL("unknown"); got != cfg.TTL {
 		t.Errorf("CommandTTL(unknown) = %v, want default %v", got, cfg.TTL)
+	}
+}
+
+// Environment overrides must also work on a fresh installation with no YAML file.
+func TestLoadEnvironmentOverrides(t *testing.T) {
+	for _, withConfig := range []bool{false, true} {
+		t.Run(map[bool]string{false: "missing config", true: "existing config"}[withConfig], func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("HOME", dir)
+			t.Setenv("USERPROFILE", dir)
+			t.Setenv("LOCALAPPDATA", dir)
+			t.Setenv("GHX_TTL", "45")
+			t.Setenv("GHX_SOCKET", "fixture-socket")
+			t.Setenv("GHX_GH_PATH", "fixture-gh")
+			if withConfig {
+				if err := os.MkdirAll(defaultGHXDir(), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(defaultGHXDir(), "config.yaml"),
+					[]byte("ttl: 10s\ngh_path: yaml-gh\nsocket_path: yaml-socket\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.TTL != 45*time.Second || cfg.SocketPath != "fixture-socket" || cfg.GHPath != "fixture-gh" {
+				t.Fatalf("overrides were not applied: %+v", cfg)
+			}
+		})
 	}
 }

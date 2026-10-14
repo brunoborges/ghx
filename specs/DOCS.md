@@ -285,6 +285,8 @@ GHX_NO_CACHE=1 ghx pr list ... # Same via env var
 GHX_TTL=60 ghx pr list ...     # Same via env var
 ```
 
+Environment overrides work without a config file and take precedence over YAML values.
+
 ## Daemon Management
 
 ```bash
@@ -372,7 +374,9 @@ Only explicitly allowlisted read-only commands are cached:
 | `gh issue create/edit/delete/close` | ❌ (mutation → invalidates issue cache) |
 | `gh auth/config/codespace/secret` | ❌ (always passthrough) |
 
-Mutations automatically invalidate related cache entries. For example, `gh pr merge 42` flushes all cached PR entries for that repo.
+Mutations run in the invoking client, preserving stdin, stdout, stderr, and terminal prompts. After the command exits, ghx invalidates related cache entries, including when `--no-cache` is used or the command fails after a partial write. For example, `ghx pr merge 42` flushes all cached PR entries for that repo. A mutation never starts a daemon solely to invalidate an empty cache. Older daemons safely flush the whole cache when receiving the scoped invalidation request.
+
+API requests are cached only when their effective method is GET. Fields imply POST unless the method is explicitly GET; GraphQL, input bodies, file-backed fields, and unknown options bypass caching. These requests are never coalesced. An invalidation failure prints a warning and preserves the mutation's exit code; the mutation is never retried.
 
 ### Custom Commands
 
@@ -474,6 +478,9 @@ ttl_overrides:
 # Max cached entries before LRU eviction (default: 1000)
 max_cache_entries: 1000
 
+# Max retained stdout + stderr bytes (default: 64 MiB)
+max_cache_bytes: 67108864
+
 # Dashboard HTTP port (default: 9847)
 dashboard_port: 9847
 
@@ -488,6 +495,16 @@ additional_cacheable:
 # Resolution order: this setting → PATH → ~/.ghx/bin/gh → auto-download
 # gh_path: /usr/local/bin/gh
 ```
+
+Both cache limits must be positive to retain responses. LRU eviction enforces both
+limits; responses exceeding the byte budget bypass storage but otherwise follow
+normal execution and transport handling. Responses whose encoded JSON exceeds
+the IPC limit of 10 MiB also bypass storage without evicting unrelated entries;
+this includes base64 expansion of stdout and stderr, plus JSON metadata. Replacing
+an entry with a rejected response discards its old value. `ghx xcache stats` and
+`/api/stats` report `cache_bytes`, `max_cache_bytes`, and `cache_rejected` so capacity
+pressure is visible. The byte limit covers response payloads; metadata is bounded
+separately by the entry limit, and executing commands still need working memory.
 
 ## Architecture
 

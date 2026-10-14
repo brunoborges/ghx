@@ -1,11 +1,14 @@
 package protocol
 
 import (
+	"encoding/base64"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
 	"io"
+	"strconv"
 
+	"github.com/brunoborges/ghx/src/internal/allowlist"
 	"github.com/brunoborges/ghx/src/internal/authenv"
 	execctx "github.com/brunoborges/ghx/src/internal/context"
 )
@@ -33,6 +36,10 @@ type Request struct {
 
 	// Type distinguishes regular gh commands from control commands.
 	Type RequestType `json:"type"`
+
+	// Resource scopes a flush to Context.Host/Repo. Older daemons ignore it
+	// and safely flush the whole cache; mutation payloads never cross IPC.
+	Resource allowlist.ResourceType `json:"resource,omitempty"`
 }
 
 type RequestType string
@@ -52,6 +59,26 @@ type Response struct {
 	ExitCode int    `json:"exit_code"`
 	Cached   bool   `json:"cached"`
 	Error    string `json:"error,omitempty"`
+}
+
+// MaxMessageSize is the maximum encoded JSON message accepted by ReadMessage.
+const MaxMessageSize = 10 * 1024 * 1024
+
+// ExecResponseFits reports whether a command result fits the IPC message limit.
+func ExecResponseFits(stdout, stderr []byte, exitCode int) bool {
+	if len(stdout) > MaxMessageSize || len(stderr) > MaxMessageSize {
+		return false
+	}
+
+	// The uncached envelope is one byte larger than the cached envelope.
+	size := len(`{"exit_code":,"cached":false}`) + len(strconv.Itoa(exitCode))
+	if len(stdout) > 0 {
+		size += len(`,"stdout":""`) + base64.StdEncoding.EncodedLen(len(stdout))
+	}
+	if len(stderr) > 0 {
+		size += len(`,"stderr":""`) + base64.StdEncoding.EncodedLen(len(stderr))
+	}
+	return size <= MaxMessageSize
 }
 
 // WriteMessage writes a length-prefixed JSON message to a writer.
@@ -81,7 +108,7 @@ func ReadMessage(r io.Reader, msg interface{}) error {
 		return fmt.Errorf("read length: %w", err)
 	}
 
-	if length > 10*1024*1024 { // 10MB sanity limit
+	if length > MaxMessageSize {
 		return fmt.Errorf("message too large: %d bytes", length)
 	}
 

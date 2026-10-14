@@ -45,7 +45,7 @@ type Server struct {
 
 // NewServer creates a new daemon server.
 func NewServer(cfg *config.Config, version string, resolvedGHPath string) *Server {
-	c := cache.New(cfg.MaxCacheEntries)
+	c := cache.NewWithByteLimit(cfg.MaxCacheEntries, cfg.MaxCacheBytes)
 	stats := metrics.New()
 	classifier := allowlist.NewClassifier(cfg.AdditionalCache)
 	handler := NewHandler(cfg, c, classifier, stats)
@@ -203,6 +203,29 @@ func (s *Server) handleConn(conn net.Conn) {
 }
 
 func (s *Server) startHTTP() {
+	httpSrv := &http.Server{
+		Addr:    fmt.Sprintf("127.0.0.1:%d", s.cfg.DashboardPort),
+		Handler: s.httpHandler(),
+	}
+
+	s.lifecycleMu.Lock()
+	select {
+	case <-s.done:
+		s.lifecycleMu.Unlock()
+		return
+	default:
+		s.httpSrv = httpSrv
+	}
+	s.lifecycleMu.Unlock()
+
+	go func() {
+		if err := httpSrv.ListenAndServe(); err != http.ErrServerClosed {
+			log.Printf("HTTP server error: %v", err)
+		}
+	}()
+}
+
+func (s *Server) httpHandler() http.Handler {
 	mux := http.NewServeMux()
 
 	// Dashboard
@@ -210,10 +233,10 @@ func (s *Server) startHTTP() {
 
 	// JSON API
 	mux.HandleFunc("/api/stats", func(w http.ResponseWriter, r *http.Request) {
-		snap := s.stats.Snapshot(s.cache.Size(), s.cfg.MaxCacheEntries)
+		snap := s.handler.snapshot()
 		resp := struct {
 			Version string `json:"version"`
-			metrics.Snapshot
+			cacheSnapshot
 		}{s.version, snap}
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -272,26 +295,7 @@ func (s *Server) startHTTP() {
 		}()
 	})
 
-	httpSrv := &http.Server{
-		Addr:    fmt.Sprintf("127.0.0.1:%d", s.cfg.DashboardPort),
-		Handler: mux,
-	}
-
-	s.lifecycleMu.Lock()
-	select {
-	case <-s.done:
-		s.lifecycleMu.Unlock()
-		return
-	default:
-		s.httpSrv = httpSrv
-	}
-	s.lifecycleMu.Unlock()
-
-	go func() {
-		if err := httpSrv.ListenAndServe(); err != http.ErrServerClosed {
-			log.Printf("HTTP server error: %v", err)
-		}
-	}()
+	return mux
 }
 
 // Shutdown gracefully stops the daemon.
