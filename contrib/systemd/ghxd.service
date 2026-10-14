@@ -7,7 +7,7 @@ ExecStart=%h/.local/bin/ghxd
 Restart=on-failure
 RestartSec=5s
 TimeoutStopSec=45s
-KillMode=control-group
+KillMode=mixed
 UMask=0077
 NoNewPrivileges=true
 

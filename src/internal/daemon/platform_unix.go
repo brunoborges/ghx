@@ -30,7 +30,7 @@ func removeStaleSocket(path string) error {
 		conn.Close()
 		return fmt.Errorf("daemon already listening at %s (stop with: ghx xdaemon stop)", path)
 	}
-	if !errors.Is(err, syscall.ECONNREFUSED) && !os.IsNotExist(err) {
+	if !errors.Is(err, syscall.ECONNREFUSED) && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("cannot determine socket ownership: %w", err)
 	}
 	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {

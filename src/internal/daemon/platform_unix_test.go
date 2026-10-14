@@ -13,8 +13,8 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
-	"syscall"
 	"testing"
 	"time"
 
@@ -36,6 +36,35 @@ func socketTempDir(t *testing.T) string {
 		}
 	})
 	return dir
+}
+
+func waitForServerReady(t *testing.T, path string, finished <-chan error) {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("unix", path, 50*time.Millisecond)
+		if err == nil {
+			defer conn.Close()
+			conn.SetDeadline(deadline)
+			if err := protocol.WriteMessage(conn, &protocol.Request{Type: protocol.TypeStats}); err != nil {
+				t.Fatal(err)
+			}
+			var response protocol.Response
+			if err := protocol.ReadMessage(conn, &response); err != nil {
+				t.Fatal(err)
+			}
+			if response.Error != "" || response.ExitCode != 0 {
+				t.Fatalf("readiness response: %+v", response)
+			}
+			return
+		}
+		select {
+		case err := <-finished:
+			t.Fatalf("startup: %v", err)
+		case <-time.After(10 * time.Millisecond):
+		}
+	}
+	t.Fatal("daemon did not become ready")
 }
 
 // Run the real kernel lock in a separate process; no in-memory substitute.
@@ -144,7 +173,16 @@ func TestServerOwnershipAndConcurrentShutdown(t *testing.T) {
 	if err := other.Start(); err != nil {
 		t.Fatal(err)
 	}
-	defer func() { other.Process.Kill(); other.Wait() }()
+	otherExited := make(chan struct{})
+	var otherErr error
+	go func() {
+		otherErr = other.Wait()
+		close(otherExited)
+	}()
+	defer func() {
+		other.Process.Kill()
+		<-otherExited
+	}()
 	cfg := config.DefaultConfig()
 	dir := socketTempDir(t)
 	cfg.SocketPath = filepath.Join(dir, "ghxd.sock")
@@ -157,35 +195,11 @@ func TestServerOwnershipAndConcurrentShutdown(t *testing.T) {
 	finished := make(chan error, 1)
 	go func() { finished <- s.Run() }()
 	defer s.Shutdown()
-	var conn net.Conn
-	deadline := time.Now().Add(5 * time.Second)
-	for time.Now().Before(deadline) {
-		var err error
-		conn, err = net.DialTimeout("unix", cfg.SocketPath, 50*time.Millisecond)
-		if err == nil {
-			break
-		}
-		select {
-		case err := <-finished:
-			t.Fatalf("startup: %v", err)
-		case <-time.After(10 * time.Millisecond):
-		}
-	}
-	if conn == nil {
-		t.Fatal("daemon did not become ready")
-	}
-	defer conn.Close()
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
-	if err := protocol.WriteMessage(conn, &protocol.Request{Type: protocol.TypeStats}); err != nil {
-		t.Fatal(err)
-	}
-	var response protocol.Response
-	if err := protocol.ReadMessage(conn, &response); err != nil {
-		t.Fatal(err)
-	}
-	conn.Close()
-	if err := other.Process.Signal(syscall.Signal(0)); err != nil {
-		t.Fatalf("startup signalled unrelated PID: %v", err)
+	waitForServerReady(t, cfg.SocketPath, finished)
+	select {
+	case <-otherExited:
+		t.Fatalf("startup signalled unrelated PID: %v", otherErr)
+	case <-time.After(100 * time.Millisecond):
 	}
 	secondCfg := *cfg
 	secondCfg.PIDFile = filepath.Join(dir, "other.pid")
@@ -226,8 +240,8 @@ func TestStartupFailureReleasesSocketAndLock(t *testing.T) {
 	if err := os.WriteFile(filepath.Dir(cfg.PIDFile), []byte{}, 0600); err != nil {
 		t.Fatal(err)
 	}
-	if err := NewServer(cfg, "test", os.Args[0]).Run(); err == nil {
-		t.Fatal("expected PID write failure")
+	if err := NewServer(cfg, "test", os.Args[0]).Run(); err == nil || !strings.Contains(err.Error(), "write pid:") {
+		t.Fatalf("expected PID write failure, got: %v", err)
 	}
 	if _, err := os.Stat(cfg.SocketPath); !os.IsNotExist(err) {
 		t.Fatal("failed startup retained socket")
@@ -271,21 +285,8 @@ func TestOwnershipRetainedUntilHTTPDrain(t *testing.T) {
 	s.httpSrv = httpServer.Config
 	finished := make(chan error, 1)
 	go func() { finished <- s.Run() }()
-	deadline := time.Now().Add(5 * time.Second)
-	ready := false
-	for time.Now().Before(deadline) {
-		conn, err := net.DialTimeout("unix", cfg.SocketPath, 50*time.Millisecond)
-		if err == nil {
-			conn.Close()
-			ready = true
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if !ready {
-		t.Fatal("daemon did not become ready")
-	}
-	defer s.Shutdown()
+	defer func() { unblock(); s.Shutdown() }()
+	waitForServerReady(t, cfg.SocketPath, finished)
 	go s.Shutdown()
 	<-s.done
 	select {

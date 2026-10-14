@@ -3,27 +3,34 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"syscall"
-
-	"github.com/brunoborges/ghx/src/internal/config"
 )
 
-// startDaemon launches ghxd as a background process.
-func startDaemon(cfg *config.Config) error {
-	ghxdPath, err := findGHXD()
-	if err != nil {
-		return err
-	}
-
-	cmd := exec.Command(ghxdPath)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
+func configureDetached(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
+}
 
-	return cmd.Start()
+// A closed listener does not imply that in-flight requests have drained.
+func daemonOwnsSocket(path string) (bool, error) {
+	lock, err := os.OpenFile(path+".lock", os.O_RDWR, 0)
+	if errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	}
+	if err != nil {
+		return false, err
+	}
+	defer lock.Close()
+	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
+		if errors.Is(err, syscall.EWOULDBLOCK) {
+			return true, nil
+		}
+		return false, err
+	}
+	return false, nil
 }
 
 // execDirect runs gh directly, replacing the current process (bypass daemon entirely).
