@@ -1,7 +1,9 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
+	"os"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -169,6 +171,110 @@ func TestHandler_CacheKeysIsolateAuthIdentity(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("executions = %d, want 2 isolated identities", calls)
+	}
+}
+
+func TestHandlerCacheByteBudget(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		name     string
+		stdout   string
+		stderr   string
+		exitCode int
+		retained bool
+	}{
+		{name: "exact limit", stdout: "out", stderr: "err", retained: true},
+		{name: "oversized stdout", stdout: "toolong", exitCode: 1},
+		{name: "oversized stderr", stderr: "toolong", exitCode: 2},
+		{name: "combined overflow", stdout: "data", stderr: "err"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := config.DefaultConfig()
+			cfg.MaxCacheBytes = 6
+			s := NewServer(cfg, "test", executable)
+			var calls int
+			s.handler.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+				calls++
+				return &executor.Result{
+					Stdout:   []byte(tt.stdout),
+					Stderr:   []byte(tt.stderr),
+					ExitCode: tt.exitCode,
+				}
+			}
+			req := &protocol.Request{
+				Type:    protocol.TypeExec,
+				Args:    []string{"pr", "list"},
+				Context: execctx.ExecContext{Host: "github.com", Repo: "o/r"},
+			}
+			for i := range 2 {
+				resp := s.handler.Handle(req)
+				if string(resp.Stdout) != tt.stdout || string(resp.Stderr) != tt.stderr ||
+					resp.ExitCode != tt.exitCode || resp.Error != "" {
+					t.Fatalf("request %d: stdout = %q, stderr = %q, exit code = %d, error = %q; want %q, %q, %d, no error",
+						i+1, resp.Stdout, resp.Stderr, resp.ExitCode, resp.Error, tt.stdout, tt.stderr, tt.exitCode)
+				}
+				if wantCached := tt.retained && i == 1; resp.Cached != wantCached {
+					t.Fatalf("request %d: cached = %v, want %v", i+1, resp.Cached, wantCached)
+				}
+			}
+			wantCalls, wantSize := 2, 0
+			wantUsage := cache.Usage{MaxBytes: 6, Rejected: 2}
+			if tt.retained {
+				wantCalls, wantSize = 1, 1
+				wantUsage.Bytes = int64(len(tt.stdout) + len(tt.stderr))
+				wantUsage.Rejected = 0
+			}
+			if calls != wantCalls {
+				t.Errorf("executions = %d, want %d", calls, wantCalls)
+			}
+			if s.cache.Size() != wantSize || s.cache.Usage() != wantUsage {
+				t.Fatalf("size = %d, usage = %+v; want size %d, usage %+v",
+					s.cache.Size(), s.cache.Usage(), wantSize, wantUsage)
+			}
+		})
+	}
+}
+
+func TestHandlerProtocolOversizedResponsePreservesCache(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := make([]byte, 8<<20)
+	cfg := config.DefaultConfig()
+	cfg.MaxCacheBytes = int64(len(payload)) + 2
+	s := NewServer(cfg, "test", executable)
+	s.cache.Set(&cache.Entry{
+		Key: "unrelated", Stdout: []byte("out"),
+		CachedAt: time.Now(), TTL: time.Minute,
+	})
+	var calls int
+	s.handler.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+		calls++
+		return &executor.Result{Stdout: payload}
+	}
+	req := &protocol.Request{
+		Type:    protocol.TypeExec,
+		Args:    []string{"pr", "list"},
+		Context: execctx.ExecContext{Host: "github.com", Repo: "o/r"},
+	}
+	for range 2 {
+		resp := s.handler.Handle(req)
+		if !bytes.Equal(resp.Stdout, payload) || len(resp.Stderr) != 0 ||
+			resp.ExitCode != 0 || resp.Error != "" || resp.Cached {
+			t.Fatal("protocol-oversized execution result must be returned unchanged and never cached")
+		}
+		if entry := s.cache.Get("unrelated"); entry == nil || string(entry.Stdout) != "out" {
+			t.Fatal("protocol-oversized response must not evict usable cached responses")
+		}
+	}
+	wantUsage := cache.Usage{Bytes: 3, MaxBytes: cfg.MaxCacheBytes, Rejected: 2}
+	if calls != 2 || s.cache.Size() != 1 || s.cache.Usage() != wantUsage {
+		t.Fatalf("executions = %d, size = %d, usage = %+v; want 2 executions, one entry, usage %+v",
+			calls, s.cache.Size(), s.cache.Usage(), wantUsage)
 	}
 }
 

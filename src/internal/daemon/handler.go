@@ -223,8 +223,17 @@ func (h *Handler) doSingleflight(key string, req *protocol.Request) (*executor.R
 	return c.res, false
 }
 
+type cacheSnapshot struct {
+	metrics.Snapshot
+	cache.Usage
+}
+
+func (h *Handler) snapshot() cacheSnapshot {
+	return cacheSnapshot{h.stats.Snapshot(h.cache.Size(), h.cfg.MaxCacheEntries), h.cache.Usage()}
+}
+
 func (h *Handler) handleStats() *protocol.Response {
-	snap := h.stats.Snapshot(h.cache.Size(), h.cfg.MaxCacheEntries)
+	snap := h.snapshot()
 	data, _ := json.Marshal(snap)
 	return &protocol.Response{Stdout: data}
 }
