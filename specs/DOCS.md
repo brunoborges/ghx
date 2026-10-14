@@ -493,8 +493,11 @@ additional_cacheable:
 ```
 
 Both cache limits must be positive to retain responses. LRU eviction enforces both
-limits; oversized responses are returned normally but bypass storage. Replacing an
-entry with an oversized response discards its old value. `ghx xcache stats` and
+limits; responses exceeding the byte budget bypass storage but otherwise follow
+normal execution and transport handling. Responses whose encoded JSON exceeds
+the IPC limit of 10 MiB also bypass storage without evicting unrelated entries;
+this includes base64 expansion of stdout and stderr, plus JSON metadata. Replacing
+an entry with a rejected response discards its old value. `ghx xcache stats` and
 `/api/stats` report `cache_bytes`, `max_cache_bytes`, and `cache_rejected` so capacity
 pressure is visible. The byte limit covers response payloads; metadata is bounded
 separately by the entry limit, and executing commands still need working memory.

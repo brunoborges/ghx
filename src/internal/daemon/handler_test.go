@@ -1,6 +1,7 @@
 package daemon
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"sync"
@@ -234,6 +235,46 @@ func TestHandlerCacheByteBudget(t *testing.T) {
 					s.cache.Size(), s.cache.Usage(), wantSize, wantUsage)
 			}
 		})
+	}
+}
+
+func TestHandlerProtocolOversizedResponsePreservesCache(t *testing.T) {
+	executable, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := make([]byte, 8<<20)
+	cfg := config.DefaultConfig()
+	cfg.MaxCacheBytes = int64(len(payload)) + 2
+	s := NewServer(cfg, "test", executable)
+	s.cache.Set(&cache.Entry{
+		Key: "unrelated", Stdout: []byte("out"),
+		CachedAt: time.Now(), TTL: time.Minute,
+	})
+	var calls int
+	s.handler.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+		calls++
+		return &executor.Result{Stdout: payload}
+	}
+	req := &protocol.Request{
+		Type:    protocol.TypeExec,
+		Args:    []string{"pr", "list"},
+		Context: execctx.ExecContext{Host: "github.com", Repo: "o/r"},
+	}
+	for range 2 {
+		resp := s.handler.Handle(req)
+		if !bytes.Equal(resp.Stdout, payload) || len(resp.Stderr) != 0 ||
+			resp.ExitCode != 0 || resp.Error != "" || resp.Cached {
+			t.Fatal("protocol-oversized execution result must be returned unchanged and never cached")
+		}
+		if entry := s.cache.Get("unrelated"); entry == nil || string(entry.Stdout) != "out" {
+			t.Fatal("protocol-oversized response must not evict usable cached responses")
+		}
+	}
+	wantUsage := cache.Usage{Bytes: 3, MaxBytes: cfg.MaxCacheBytes, Rejected: 2}
+	if calls != 2 || s.cache.Size() != 1 || s.cache.Usage() != wantUsage {
+		t.Fatalf("executions = %d, size = %d, usage = %+v; want 2 executions, one entry, usage %+v",
+			calls, s.cache.Size(), s.cache.Usage(), wantUsage)
 	}
 }
 

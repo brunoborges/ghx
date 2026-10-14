@@ -200,6 +200,48 @@ func TestEntryLimitReleasesResponseBytes(t *testing.T) {
 	}
 }
 
+func TestProtocolOversizedResponsesPreserveCache(t *testing.T) {
+	payload := make([]byte, 8<<20)
+	for _, tt := range []struct {
+		name       string
+		maxEntries int
+		maxBytes   int64
+		key        string
+	}{
+		{name: "byte pressure", maxEntries: 10, maxBytes: int64(len(payload)) + 2, key: "large"},
+		{name: "entry pressure", maxEntries: 2, maxBytes: DefaultMaxBytes, key: "large"},
+		{name: "replacement", maxEntries: 10, maxBytes: int64(len(payload)) + 2, key: "a"},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			c := NewWithByteLimit(tt.maxEntries, tt.maxBytes)
+			c.Set(budgetEntry(t, "a", 3))
+			c.Set(budgetEntry(t, "b", 3))
+			var evictions int
+			c.OnEvict(func(string) { evictions++ })
+			c.Set(&Entry{
+				Key: tt.key, Stdout: payload,
+				CachedAt: time.Now(), TTL: time.Minute,
+			})
+			if c.Get(tt.key) != nil {
+				t.Fatal("response over the encoded IPC limit must not be cached")
+			}
+			if c.Get("b") == nil || (tt.key != "a" && c.Get("a") == nil) {
+				t.Fatal("rejected response must preserve unrelated entries")
+			}
+			wantSize := 2
+			wantBytes := int64(6)
+			if tt.key == "a" {
+				wantSize, wantBytes = 1, 3
+			}
+			wantUsage := Usage{Bytes: wantBytes, MaxBytes: tt.maxBytes, Rejected: 1}
+			if c.Size() != wantSize || c.Usage() != wantUsage || evictions != 0 {
+				t.Fatalf("size = %d, usage = %+v, evictions = %d; want size %d, usage %+v, no evictions",
+					c.Size(), c.Usage(), evictions, wantSize, wantUsage)
+			}
+		})
+	}
+}
+
 func TestByteBudgetCountsStderrAndReleases(t *testing.T) {
 	c := NewWithByteLimit(2, 6)
 	a := budgetEntry(t, "a", 3)

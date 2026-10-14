@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/brunoborges/ghx/src/internal/allowlist"
+	"github.com/brunoborges/ghx/src/internal/protocol"
 )
 
 // Entry is a cached response.
@@ -110,7 +111,8 @@ func (c *Cache) Set(entry *Entry) {
 	}
 
 	bytes := int64(len(entry.Stdout)) + int64(len(entry.Stderr))
-	if c.maxSize <= 0 || c.maxBytes <= 0 || bytes > c.maxBytes {
+	if c.maxSize <= 0 || c.maxBytes <= 0 || bytes > c.maxBytes ||
+		!protocol.ExecResponseFits(entry.Stdout, entry.Stderr, entry.ExitCode) {
 		c.rejected++
 		return
 	}
