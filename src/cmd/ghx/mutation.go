@@ -16,7 +16,7 @@ import (
 // that may have partially changed remote state. Mutations are never replayed.
 func runMutation(cmd *exec.Cmd, flush *protocol.Request, send func(*protocol.Request) (*protocol.Response, error)) int {
 	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
+	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(signals)
 	if err := cmd.Start(); err != nil {
 		fmt.Fprintf(cmd.Stderr, "ghx: %v\n", err)
