@@ -58,7 +58,12 @@ func (c *Client) Send(req *protocol.Request) (*protocol.Response, error) {
 	defer conn.Close()
 
 	// Short deadline covers only the request write — guarding against a stuck daemon.
-	conn.SetWriteDeadline(time.Now().Add(30 * time.Second))
+	deadline := time.Now().Add(30 * time.Second)
+	control := req.Type != protocol.TypeExec && req.Type != ""
+	if control {
+		deadline = time.Now().Add(c.timeout)
+	}
+	conn.SetWriteDeadline(deadline)
 
 	if err := protocol.WriteMessage(conn, req); err != nil {
 		return nil, fmt.Errorf("send request: %w", err)
@@ -67,7 +72,13 @@ func (c *Client) Send(req *protocol.Request) (*protocol.Response, error) {
 	// Remove all deadlines: the wrapped gh command may run for several minutes
 	// and return a large payload. A fixed timeout here causes the client to give
 	// up and fall back to direct execution, silently double-spending API quota.
-	conn.SetDeadline(time.Time{})
+	if control {
+		// Invalidation follows a completed mutation; a stuck daemon must not
+		// hold that command open indefinitely. Execution requests stay unlimited.
+		conn.SetDeadline(deadline)
+	} else {
+		conn.SetDeadline(time.Time{})
+	}
 
 	var resp protocol.Response
 	if err := protocol.ReadMessage(conn, &resp); err != nil {

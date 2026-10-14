@@ -4,8 +4,13 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
+	"time"
 
+	"github.com/brunoborges/ghx/src/internal/ipc"
 	"github.com/brunoborges/ghx/src/internal/protocol"
 )
 
@@ -107,4 +112,52 @@ func TestSend_RequestSentReadFails(t *testing.T) {
 		t.Error("errors.As(*ErrRequestSent) returned false")
 	}
 	_ = c // suppress unused warning
+}
+
+func TestSendControlDeadlineDoesNotLimitExecution(t *testing.T) {
+	for _, kind := range []protocol.RequestType{protocol.TypeFlush, protocol.TypeExec} {
+		t.Run(string(kind), func(t *testing.T) {
+			dir, err := os.MkdirTemp("", "ghx-")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer os.RemoveAll(dir)
+			address := filepath.Join(dir, "s")
+			if runtime.GOOS == "windows" {
+				address = fmt.Sprintf(`\\.\pipe\ghx-test-%d-%d`, os.Getpid(), time.Now().UnixNano())
+			}
+			ln, err := ipc.Listen(address)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer ln.Close()
+			done := make(chan struct{})
+			go func() {
+				defer close(done)
+				conn, err := ln.Accept()
+				if err != nil {
+					return
+				}
+				defer conn.Close()
+				var request protocol.Request
+				if protocol.ReadMessage(conn, &request) != nil {
+					return
+				}
+				time.Sleep(100 * time.Millisecond)
+				_ = protocol.WriteMessage(conn, &protocol.Response{Stdout: []byte("done")})
+			}()
+			c := New(address)
+			c.timeout = 20 * time.Millisecond
+			response, err := c.Send(&protocol.Request{Type: kind})
+			<-done
+			if kind == protocol.TypeFlush {
+				var sent *ErrRequestSent
+				if !errors.As(err, &sent) {
+					t.Fatalf("control deadline error = %v", err)
+				}
+			} else if err != nil || string(response.Stdout) != "done" {
+				t.Fatalf("execution response=%+v error=%v", response, err)
+			}
+		})
+	}
 }

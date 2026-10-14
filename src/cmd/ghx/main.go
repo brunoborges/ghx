@@ -57,13 +57,20 @@ func main() {
 	// interactive or otherwise unsuitable for the daemon. Execute gh directly so the
 	// user gets a full TTY and no IPC timeout can occur.
 	classifier := allowlist.NewClassifier(cfg.AdditionalCache)
-	if classifier.Classify(ghArgs).Type == allowlist.Passthrough {
+	classification := classifier.Classify(ghArgs)
+	if classification.Type == allowlist.Passthrough {
 		execDirect(cfg.GHPath, ghArgs)
 		return
 	}
 
 	// Resolve execution context
 	ctx := execctx.Resolve(cfg.GHPath)
+	if classification.Type == allowlist.Mutation {
+		cmd := exec.Command(cfg.GHPath, ghArgs...)
+		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+		req := &protocol.Request{Type: protocol.TypeFlush, Context: ctx, Resource: classification.Resource}
+		os.Exit(runMutation(cmd, req, client.New(cfg.SocketPath).Send))
+	}
 
 	// Connect to daemon, auto-starting if needed
 	cl := client.New(cfg.SocketPath)

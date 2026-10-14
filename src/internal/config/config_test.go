@@ -1,9 +1,12 @@
 package config
 
 import (
+	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestDefaultConfigSocketPath(t *testing.T) {
@@ -78,5 +81,36 @@ func TestCommandTTL(t *testing.T) {
 	}
 	if got := cfg.CommandTTL("unknown"); got != cfg.TTL {
 		t.Errorf("CommandTTL(unknown) = %v, want default %v", got, cfg.TTL)
+	}
+}
+
+// Environment overrides must also work on a fresh installation with no YAML file.
+func TestLoadEnvironmentOverrides(t *testing.T) {
+	for _, withConfig := range []bool{false, true} {
+		t.Run(map[bool]string{false: "missing config", true: "existing config"}[withConfig], func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("HOME", dir)
+			t.Setenv("USERPROFILE", dir)
+			t.Setenv("LOCALAPPDATA", dir)
+			t.Setenv("GHX_TTL", "45")
+			t.Setenv("GHX_SOCKET", "fixture-socket")
+			t.Setenv("GHX_GH_PATH", "fixture-gh")
+			if withConfig {
+				if err := os.MkdirAll(defaultGHXDir(), 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(defaultGHXDir(), "config.yaml"),
+					[]byte("ttl: 10s\ngh_path: yaml-gh\nsocket_path: yaml-socket\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			cfg, err := Load()
+			if err != nil {
+				t.Fatal(err)
+			}
+			if cfg.TTL != 45*time.Second || cfg.SocketPath != "fixture-socket" || cfg.GHPath != "fixture-gh" {
+				t.Fatalf("overrides were not applied: %+v", cfg)
+			}
+		})
 	}
 }
