@@ -8,7 +8,7 @@ import (
 )
 
 // removeStaleSocket is a no-op on Windows; named pipes are managed by the OS.
-func removeStaleSocket(_ string) {}
+func removeStaleSocket(_ string) error { return nil }
 
 // setSocketPermissions is a no-op on Windows; named pipes use security descriptors.
 func setSocketPermissions(_ string) error { return nil }
@@ -19,6 +19,6 @@ func notifyShutdownSignals(ch chan<- os.Signal) {
 	signal.Notify(ch, os.Interrupt)
 }
 
-// ensureSingleInstance is a no-op on Windows; named pipes prevent multiple
+// acquireInstanceLock is a no-op on Windows; named pipes prevent multiple
 // listeners on the same path at the OS level.
-func ensureSingleInstance(_ string) error { return nil }
+func acquireInstanceLock(_ string) (*os.File, error) { return nil, nil }

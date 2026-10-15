@@ -299,6 +299,12 @@ ghx xdaemon restart        # Stop + start
 
 The daemon auto-starts on first `ghx` call. If the daemon can't start, `ghx` falls back to running `gh` directly — it never blocks you.
 
+Detached starts confirm a successful stats request before reporting success
+(up to 5 seconds). Restart waits up to 45 seconds for the previous daemon's
+listener and Unix instance lock to be released, allowing in-flight commands to
+drain before starting the replacement. If draining or startup times out, the
+command reports an error instead of claiming a successful restart.
+
 ## Cache Management
 
 ```bash
@@ -563,3 +569,25 @@ make clean
 ## License
 
 [MIT](LICENSE)
+
+### Linux user service
+
+Install `ghx` and `ghxd` in `~/.local/bin`, then copy
+[`contrib/systemd/ghxd.service`](../contrib/systemd/ghxd.service) to
+`~/.config/systemd/user/ghxd.service`. In `~/.ghx/config.yaml`, set
+`auto_start: false`, `dashboard_port: 0` (unless needed), and `log_file: ""`
+to send diagnostics to the journal. Stop an existing daemon with
+`ghx xdaemon stop`, then run `systemctl --user daemon-reload` and
+`systemctl --user enable --now ghxd`. Inspect failures with
+`journalctl --user -u ghxd`; restart with `systemctl --user restart ghxd`.
+Use the service manager to stop/restart a service-managed daemon.
+
+The unit sends the initial shutdown signal only to the daemon, allowing active
+`gh` subprocesses to finish. If shutdown exceeds 45 seconds, systemd forcibly
+terminates the remaining processes in the service's control group.
+
+Unix daemons hold a kernel lock for their socket's lifetime. A concurrent start
+fails with a diagnostic before changing the socket or PID file. The persistent
+`.sock.lock` file must remain in place; it does not indicate a live daemon on its
+own. Stale PID files never authorize signalling a process. Startup also refuses
+an already-listening socket, including daemons from older releases.

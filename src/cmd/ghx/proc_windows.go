@@ -7,25 +7,14 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
-
-	"github.com/brunoborges/ghx/src/internal/config"
 )
 
-// startDaemon launches ghxd as a background process.
-// On Windows, CREATE_NEW_PROCESS_GROUP is used instead of Setsid.
-func startDaemon(cfg *config.Config) error {
-	ghxdPath, err := findGHXD()
-	if err != nil {
-		return err
-	}
-
-	cmd := exec.Command(ghxdPath)
-	cmd.Stdout = nil
-	cmd.Stderr = nil
+func configureDetached(cmd *exec.Cmd) {
 	cmd.SysProcAttr = &syscall.SysProcAttr{CreationFlags: 0x00000200} // CREATE_NEW_PROCESS_GROUP
-
-	return cmd.Start()
 }
+
+// Named pipes have no persistent instance lock; readiness is checked over IPC.
+func daemonOwnsSocket(_ string) (bool, error) { return false, nil }
 
 // execDirect runs gh directly (bypass daemon entirely).
 // Windows has no exec-replace, so we run the command and exit.

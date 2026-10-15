@@ -1,0 +1,15 @@
+[Unit]
+Description=GitHub CLI cache daemon
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/ghxd
+Restart=on-failure
+RestartSec=5s
+TimeoutStopSec=45s
+KillMode=mixed
+UMask=0077
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
