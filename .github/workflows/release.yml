@@ -23,15 +23,17 @@ jobs:
       - name: Run tests
         run: go test -race ./...
 
-      - name: Build binaries
+      - name: Build release archives
         id: build
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
-          VERSION_NUM=${VERSION#v}
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "Invalid release version: $VERSION" >&2
+            exit 1
+          fi
           LDFLAGS="-s -w -X main.version=${VERSION}"
-
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "version_num=${VERSION_NUM}" >> "$GITHUB_OUTPUT"
+          echo "version_num=${VERSION#v}" >> "$GITHUB_OUTPUT"
 
           platforms=(
             "darwin/arm64"
@@ -42,13 +44,18 @@ jobs:
             "windows/arm64"
           )
 
-          mkdir -p dist
+          mkdir dist
+          jq -n --arg version "$VERSION" \
+            --arg commit "$(git rev-parse HEAD)" \
+            --arg go_version "$(go env GOVERSION)" \
+            --args '{version: $version, commit: $commit, go_version: $go_version, platforms: $ARGS.positional}' \
+            "${platforms[@]}" > dist/source.json
 
           for platform in "${platforms[@]}"; do
             GOOS="${platform%/*}"
             GOARCH="${platform#*/}"
             output="dist/ghx-${GOOS}-${GOARCH}"
-            mkdir -p "${output}"
+            mkdir "${output}"
 
             EXE_SUFFIX=""
             if [ "${GOOS}" = "windows" ]; then
@@ -56,43 +63,47 @@ jobs:
             fi
 
             echo "Building ${GOOS}/${GOARCH}..."
-            GOOS=${GOOS} GOARCH=${GOARCH} go build -ldflags "${LDFLAGS}" -o "${output}/ghx${EXE_SUFFIX}" ./src/cmd/ghx
-            GOOS=${GOOS} GOARCH=${GOARCH} go build -ldflags "${LDFLAGS}" -o "${output}/ghxd${EXE_SUFFIX}" ./src/cmd/ghxd
+            CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build -trimpath -buildvcs=true -ldflags "${LDFLAGS}" -o "${output}/ghx${EXE_SUFFIX}" ./src/cmd/ghx
+            CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build -trimpath -buildvcs=true -ldflags "${LDFLAGS}" -o "${output}/ghxd${EXE_SUFFIX}" ./src/cmd/ghxd
+            cp LICENSE dist/source.json "${output}/"
 
             if [ "${GOOS}" = "windows" ]; then
-              # Include gh.cmd shim for Windows
               printf '@echo off\r\nrem ghx-shim: this script redirects gh commands through ghx for caching\r\nghx %%*\r\n' > "${output}/gh.cmd"
-              (cd "${output}" && zip "../../dist/ghx-${GOOS}-${GOARCH}.zip" "ghx${EXE_SUFFIX}" "ghxd${EXE_SUFFIX}" "gh.cmd")
+              zip -j "${output}.zip" "${output}/"*
             else
-              # Include gh shim script in tarball
               printf '#!/bin/sh\n# ghx-shim: this script redirects gh commands through ghx for caching\nexec ghx "$@"\n' > "${output}/gh"
               chmod +x "${output}/gh"
-              tar -czf "dist/ghx-${GOOS}-${GOARCH}.tar.gz" -C "${output}" ghx ghxd gh
+              tar -czf "${output}.tar.gz" -C "${output}" ghx ghxd gh LICENSE source.json
             fi
+          done
+
+      - name: Compute checksums
+        id: checksums
+        run: |
+          cd dist || exit 1
+          sha256sum -- *.tar.gz *.zip source.json > checksums.txt
+          sha256sum --check checksums.txt
+
+          for platform in DARWIN_ARM64 DARWIN_AMD64 LINUX_AMD64 LINUX_ARM64; do
+            archive="ghx-$(echo "$platform" | tr '[:upper:]_' '[:lower:]-').tar.gz"
+            sum=$(awk -v name="$archive" '$2 == name {print $1}' checksums.txt)
+            test -n "$sum"
+            echo "SHA_${platform}=${sum}" >> "$GITHUB_OUTPUT"
           done
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
             dist/*.tar.gz
             dist/*.zip
-
-      - name: Compute checksums
-        id: checksums
-        run: |
-          cd dist
-          for f in *.tar.gz *.zip; do
-            [ -f "$f" ] && sha256sum "$f"
-          done | tee checksums.txt
-
-          echo "SHA_DARWIN_ARM64=$(grep darwin-arm64 checksums.txt | awk '{print $1}')" >> "$GITHUB_OUTPUT"
-          echo "SHA_DARWIN_AMD64=$(grep darwin-amd64 checksums.txt | awk '{print $1}')" >> "$GITHUB_OUTPUT"
-          echo "SHA_LINUX_AMD64=$(grep linux-amd64 checksums.txt | awk '{print $1}')" >> "$GITHUB_OUTPUT"
-          echo "SHA_LINUX_ARM64=$(grep linux-arm64 checksums.txt | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+            dist/checksums.txt
+            dist/source.json
 
       - name: Update Homebrew tap
+        if: github.repository == 'brunoborges/ghx' && !contains(github.ref_name, '-')
         env:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |

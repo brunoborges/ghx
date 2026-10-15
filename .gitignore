@@ -12,3 +12,6 @@ bin/
 .idea/
 .vscode/
 *.swp
+
+# Release archives
+dist/
