@@ -21,23 +21,72 @@ jobs:
           go-version-file: go.mod
 
       - name: Run tests
-        run: go test -race -count=1 ./...
+        run: go test -race ./...
 
-      - name: Build release archives and checksums
+      - name: Build release archives
         id: build
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "Invalid release version: $VERSION" >&2
+            exit 1
+          fi
+          LDFLAGS="-s -w -X main.version=${VERSION}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "version_num=${VERSION#v}" >> "$GITHUB_OUTPUT"
-          go run ./scripts/release "$VERSION" dist
-          (cd dist && sha256sum --check checksums.txt)
 
-      - name: Read archive checksums
+          platforms=(
+            "darwin/arm64"
+            "darwin/amd64"
+            "linux/amd64"
+            "linux/arm64"
+            "windows/amd64"
+            "windows/arm64"
+          )
+
+          mkdir dist
+          jq -n --arg version "$VERSION" \
+            --arg commit "$(git rev-parse HEAD)" \
+            --arg go_version "$(go env GOVERSION)" \
+            --args '{version: $version, commit: $commit, go_version: $go_version, platforms: $ARGS.positional}' \
+            "${platforms[@]}" > dist/source.json
+
+          for platform in "${platforms[@]}"; do
+            GOOS="${platform%/*}"
+            GOARCH="${platform#*/}"
+            output="dist/ghx-${GOOS}-${GOARCH}"
+            mkdir "${output}"
+
+            EXE_SUFFIX=""
+            if [ "${GOOS}" = "windows" ]; then
+              EXE_SUFFIX=".exe"
+            fi
+
+            echo "Building ${GOOS}/${GOARCH}..."
+            CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build -trimpath -buildvcs=true -ldflags "${LDFLAGS}" -o "${output}/ghx${EXE_SUFFIX}" ./src/cmd/ghx
+            CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build -trimpath -buildvcs=true -ldflags "${LDFLAGS}" -o "${output}/ghxd${EXE_SUFFIX}" ./src/cmd/ghxd
+            cp LICENSE dist/source.json "${output}/"
+
+            if [ "${GOOS}" = "windows" ]; then
+              printf '@echo off\r\nrem ghx-shim: this script redirects gh commands through ghx for caching\r\nghx %%*\r\n' > "${output}/gh.cmd"
+              zip -j "${output}.zip" "${output}/"*
+            else
+              printf '#!/bin/sh\n# ghx-shim: this script redirects gh commands through ghx for caching\nexec ghx "$@"\n' > "${output}/gh"
+              chmod +x "${output}/gh"
+              tar -czf "${output}.tar.gz" -C "${output}" ghx ghxd gh LICENSE source.json
+            fi
+          done
+
+      - name: Compute checksums
         id: checksums
         run: |
+          cd dist || exit 1
+          sha256sum -- *.tar.gz *.zip source.json > checksums.txt
+          sha256sum --check checksums.txt
+
           for platform in DARWIN_ARM64 DARWIN_AMD64 LINUX_AMD64 LINUX_ARM64; do
             archive="ghx-$(echo "$platform" | tr '[:upper:]_' '[:lower:]-').tar.gz"
-            sum=$(awk -v name="$archive" '$2 == name {print $1}' dist/checksums.txt)
+            sum=$(awk -v name="$archive" '$2 == name {print $1}' checksums.txt)
             test -n "$sum"
             echo "SHA_${platform}=${sum}" >> "$GITHUB_OUTPUT"
           done
@@ -46,6 +95,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          fail_on_unmatched_files: true
           files: |
             dist/*.tar.gz
             dist/*.zip

@@ -65,6 +65,8 @@ This installs `ghx.exe` and `ghxd.exe` to `%LOCALAPPDATA%\ghx\bin` and adds it t
 
 ### Manual download
 
+Each release includes `checksums.txt` with SHA-256 hashes for the archives and `source.json`, which records the version, source commit, Go version, and target platforms. Each archive also contains `LICENSE` and the same `source.json`.
+
 Download the latest release for your platform from [GitHub Releases](https://github.com/brunoborges/ghx/releases):
 
 ```bash
