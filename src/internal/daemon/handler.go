@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -129,7 +130,7 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 	if classification.Type == allowlist.Mutation {
 		result := h.execGH(req.Args, req.WorkDir, req.AuthEnv)
 		latency := time.Since(start).Seconds() * 1000
-		h.stats.Record(cmdKey, "", metrics.ResultPassthrough, latency)
+		h.record(req, nil, cmdKey, "", metrics.ResultPassthrough, latency)
 
 		if classification.Resource != allowlist.ResourceUnknown {
 			host, repo := classification.Target(req.Context.Host, req.Context.Repo)
@@ -147,7 +148,7 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 	if classification.Type == allowlist.Passthrough {
 		result := h.execGH(req.Args, req.WorkDir, req.AuthEnv)
 		latency := time.Since(start).Seconds() * 1000
-		h.stats.Record(cmdKey, "", metrics.ResultPassthrough, latency)
+		h.record(req, nil, cmdKey, "", metrics.ResultPassthrough, latency)
 
 		return &protocol.Response{
 			Stdout:   result.Stdout,
@@ -171,7 +172,7 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 	// request) but still stores the fresh result so other callers reuse it.
 	if req.NoCache {
 		result := h.execGH(plan.Fetch, req.WorkDir, req.AuthEnv)
-		h.stats.Record(cmdKey, cacheKey, metrics.ResultMiss, time.Since(start).Seconds()*1000)
+		h.record(req, plan.Fetch, cmdKey, cacheKey, metrics.ResultMiss, time.Since(start).Seconds()*1000)
 		h.store(cacheKey, cmdKey, classification, req, result)
 		h.indexFields(baseKey, cacheKey, plan.Fields)
 		return h.finish(plan, req, result, false)
@@ -179,11 +180,11 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 
 	// Check cache, then any entry that fetched a superset of the fields
 	if entry := h.cache.Get(cacheKey); entry != nil {
-		h.stats.Record(cmdKey, cacheKey, metrics.ResultHit, time.Since(start).Seconds()*1000)
+		h.record(req, plan.Fetch, cmdKey, cacheKey, metrics.ResultHit, time.Since(start).Seconds()*1000)
 		return h.finish(plan, req, entryResult(entry), true)
 	}
 	if result := h.lookupSuperset(baseKey, plan.Fields); result != nil {
-		h.stats.Record(cmdKey, cacheKey, metrics.ResultHit, time.Since(start).Seconds()*1000)
+		h.record(req, plan.Fetch, cmdKey, cacheKey, metrics.ResultHit, time.Since(start).Seconds()*1000)
 		return h.finish(plan, req, result, true)
 	}
 
@@ -192,15 +193,32 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 	latency := time.Since(start).Seconds() * 1000
 
 	if coalesced {
-		h.stats.Record(cmdKey, cacheKey, metrics.ResultCoalesced, latency)
+		h.record(req, plan.Fetch, cmdKey, cacheKey, metrics.ResultCoalesced, latency)
 	} else {
-		h.stats.Record(cmdKey, cacheKey, metrics.ResultMiss, latency)
+		h.record(req, plan.Fetch, cmdKey, cacheKey, metrics.ResultMiss, latency)
 	}
 
 	h.store(cacheKey, cmdKey, classification, req, result)
 	h.indexFields(baseKey, cacheKey, plan.Fields)
 
 	return h.finish(plan, req, result, false)
+}
+
+// record logs a request. Arguments are attached, redacted, only when
+// log_args is enabled; fetch is included when it differs from the args.
+func (h *Handler) record(req *protocol.Request, fetch []string, cmdKey, cacheKey string, result metrics.RequestResult, latencyMs float64) {
+	if !h.cfg.LogArgs {
+		h.stats.Record(cmdKey, cacheKey, result, latencyMs)
+		return
+	}
+	args := req.Args
+	if req.NoCache {
+		args = append([]string{"--no-cache"}, args...)
+	}
+	if slices.Equal(fetch, req.Args) {
+		fetch = nil
+	}
+	h.stats.RecordDetailed(cmdKey, cacheKey, result, latencyMs, metrics.RedactArgs(args), metrics.RedactArgs(fetch))
 }
 
 func entryResult(e *cache.Entry) *executor.Result {

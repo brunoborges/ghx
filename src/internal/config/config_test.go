@@ -134,12 +134,13 @@ func TestLoadEnvironmentOverrides(t *testing.T) {
 			t.Setenv("GHX_TTL", "45")
 			t.Setenv("GHX_SOCKET", "fixture-socket")
 			t.Setenv("GHX_GH_PATH", "fixture-gh")
+			t.Setenv("GHX_LOG_ARGS", "1")
 			if withConfig {
 				if err := os.MkdirAll(defaultGHXDir(), 0700); err != nil {
 					t.Fatal(err)
 				}
 				if err := os.WriteFile(filepath.Join(defaultGHXDir(), "config.yaml"),
-					[]byte("ttl: 10s\ngh_path: yaml-gh\nsocket_path: yaml-socket\n"), 0600); err != nil {
+					[]byte("ttl: 10s\ngh_path: yaml-gh\nsocket_path: yaml-socket\nlog_args: false\n"), 0600); err != nil {
 					t.Fatal(err)
 				}
 			}
@@ -147,7 +148,7 @@ func TestLoadEnvironmentOverrides(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if cfg.TTL != 45*time.Second || cfg.SocketPath != "fixture-socket" || cfg.GHPath != "fixture-gh" {
+			if cfg.TTL != 45*time.Second || cfg.SocketPath != "fixture-socket" || cfg.GHPath != "fixture-gh" || !cfg.LogArgs {
 				t.Fatalf("overrides were not applied: %+v", cfg)
 			}
 		})
@@ -156,6 +157,9 @@ func TestLoadEnvironmentOverrides(t *testing.T) {
 
 func TestLifetimeTTLDefaults(t *testing.T) {
 	cfg := DefaultConfig()
+	if cfg.LogArgs {
+		t.Error("LogArgs must be off by default")
+	}
 	if cfg.ImmutableTTL != time.Hour || cfg.SettledTTL != 10*time.Minute {
 		t.Fatalf("ImmutableTTL=%v SettledTTL=%v", cfg.ImmutableTTL, cfg.SettledTTL)
 	}

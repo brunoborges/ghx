@@ -684,3 +684,28 @@ func TestHandlerAPIJQSharesResponse(t *testing.T) {
 		t.Fatalf("executions = %d, want 1", calls)
 	}
 }
+
+func TestHandlerLogsRedactedArgsWhenEnabled(t *testing.T) {
+	h := newTestHandler()
+	h.cfg.LogArgs = true
+	h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+		return &executor.Result{Stdout: []byte(`{"a":1}`)}
+	}
+	ctx := execctx.ExecContext{Host: "github.com", Repo: "o/r"}
+	h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"api", "repos/o/r", "-H", "Authorization: token x", "--jq", ".a"}, Context: ctx, NoCache: true})
+	h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"run", "view", "7"}, Context: ctx})
+
+	log := h.stats.Log(0)
+	if len(log) != 2 {
+		t.Fatalf("log = %+v", log)
+	}
+	if got := strings.Join(log[0].Args, " "); got != "--no-cache api repos/o/r -H Authorization: [REDACTED] --jq .a" {
+		t.Errorf("args = %q", got)
+	}
+	if got := strings.Join(log[0].Fetch, " "); got != "api repos/o/r -H Authorization: [REDACTED]" {
+		t.Errorf("fetch = %q", got)
+	}
+	if log[1].Fetch != nil {
+		t.Errorf("fetch should be omitted when unchanged: %q", log[1].Fetch)
+	}
+}

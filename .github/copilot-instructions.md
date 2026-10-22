@@ -35,7 +35,7 @@ go test -v -race -coverprofile=coverage.out ./...
 | `allowlist` | Classifies commands as `Cacheable`, `Mutation`, or `Passthrough` |
 | `cache` | Thread-safe LRU cache with per-entry TTL and namespace invalidation |
 | `client` | Thin Unix socket client with health-check support |
-| `config` | Loads `~/.ghx/config.yaml` with env var overrides (`GHX_TTL`, `GHX_SOCKET`, `GHX_GH_PATH`) |
+| `config` | Loads `~/.ghx/config.yaml` with env var overrides (`GHX_TTL`, `GHX_SOCKET`, `GHX_GH_PATH`, `GHX_LOG_ARGS`) |
 | `context` | Resolves git execution context (host, repo, branch, token hash) for cache key generation |
 | `daemon` | Server, connection handler, and request dispatcher |
 | `dashboard` | Embedded single-file HTML dashboard with JSON API endpoints |
