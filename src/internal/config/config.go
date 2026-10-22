@@ -11,6 +11,8 @@ import (
 type Config struct {
 	TTL             time.Duration            `yaml:"ttl"`
 	TTLOverrides    map[string]time.Duration `yaml:"ttl_overrides"`
+	ImmutableTTL    time.Duration            `yaml:"immutable_ttl"` // content addressed by commit SHA
+	SettledTTL      time.Duration            `yaml:"settled_ttl"`   // specific runs/jobs reporting status "completed"
 	MaxCacheBytes   int64                    `yaml:"max_cache_bytes"`
 	MaxCacheEntries int                      `yaml:"max_cache_entries"`
 	SocketPath      string                   `yaml:"socket_path"`
@@ -27,6 +29,8 @@ func DefaultConfig() *Config {
 	return &Config{
 		TTL:             30 * time.Second,
 		TTLOverrides:    make(map[string]time.Duration),
+		ImmutableTTL:    time.Hour,
+		SettledTTL:      10 * time.Minute,
 		MaxCacheEntries: 1000,
 		MaxCacheBytes:   64 << 20,
 		SocketPath:      defaultSocketPath(ghxDir),

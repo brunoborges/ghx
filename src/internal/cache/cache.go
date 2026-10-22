@@ -98,6 +98,14 @@ func (c *Cache) Get(key string) *Entry {
 	return entry
 }
 
+// Contains reports whether key holds a live entry without affecting LRU order.
+func (c *Cache) Contains(key string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	elem, ok := c.items[key]
+	return ok && !elem.Value.(*storedEntry).entry.IsExpired()
+}
+
 // Set stores an entry in the cache.
 func (c *Cache) Set(entry *Entry) {
 	c.mu.Lock()
@@ -149,6 +157,24 @@ func (c *Cache) InvalidateNamespace(host, repo string, resource allowlist.Resour
 		}
 	}
 
+	for _, elem := range toRemove {
+		c.removeElement(elem)
+	}
+	return len(toRemove)
+}
+
+// InvalidateRepo removes all entries for the given host and repo, regardless of resource type.
+func (c *Cache) InvalidateRepo(host, repo string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	var toRemove []*list.Element
+	for elem := c.order.Front(); elem != nil; elem = elem.Next() {
+		entry := elem.Value.(*storedEntry).entry
+		if entry.Host == host && entry.Repo == repo {
+			toRemove = append(toRemove, elem)
+		}
+	}
 	for _, elem := range toRemove {
 		c.removeElement(elem)
 	}

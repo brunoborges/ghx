@@ -67,6 +67,14 @@ func TestMutations(t *testing.T) {
 		{[]string{"secret", "delete", "MY_SECRET"}, Mutation},
 		{[]string{"variable", "set", "MY_VAR"}, Mutation},
 		{[]string{"variable", "delete", "MY_VAR"}, Mutation},
+		{[]string{"run", "cancel", "123"}, Mutation},
+		{[]string{"run", "rerun", "123", "--failed"}, Mutation},
+		{[]string{"workflow", "run", "ci.yml"}, Mutation},
+		{[]string{"workflow", "enable", "ci.yml"}, Mutation},
+		{[]string{"release", "upload", "v1", "a.tgz"}, Mutation},
+		{[]string{"repo", "sync"}, Mutation},
+		{[]string{"pr", "update-branch", "1"}, Mutation},
+		{[]string{"project", "item-add", "1"}, Mutation},
 	}
 
 	for _, tt := range tests {
@@ -172,5 +180,109 @@ func TestAPIEffectiveMethod(t *testing.T) {
 				t.Fatalf("Classify(%q) = %+v, want %v", tt.args, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestMutationResourceRouting(t *testing.T) {
+	c := NewClassifier(nil)
+	tests := []struct {
+		args []string
+		want ResourceType
+	}{
+		{[]string{"workflow", "run", "ci.yml"}, ResourceRun},
+		{[]string{"run", "cancel", "1"}, ResourceRun},
+		{[]string{"workflow", "disable", "ci.yml"}, ResourceWorkflow},
+		{[]string{"label", "clone", "o/r"}, ResourceLabel},
+	}
+	for _, tt := range tests {
+		if got := c.Classify(tt.args); got.Type != Mutation || got.Resource != tt.want {
+			t.Errorf("Classify(%v) = %+v, want Mutation/%s", tt.args, got, tt.want)
+		}
+	}
+}
+
+func TestReadOnlyRunCommandsStayPassthrough(t *testing.T) {
+	c := NewClassifier(nil)
+	for _, args := range [][]string{{"run", "watch", "1"}, {"run", "download", "1"}, {"repo", "clone", "o/r"}, {"pr", "checkout", "1"}} {
+		if got := c.Classify(args); got.Type != Passthrough {
+			t.Errorf("Classify(%v) = %+v, want Passthrough", args, got)
+		}
+	}
+}
+
+func TestScopeHints(t *testing.T) {
+	c := NewClassifier(nil)
+	tests := []struct {
+		name                     string
+		args                     []string
+		ignoreBranch, ignoreRepo bool
+		host, repo               string
+	}{
+		{"pr view current branch", []string{"pr", "view"}, false, false, "", ""},
+		{"pr view json only", []string{"pr", "view", "--json", "number"}, false, false, "", ""},
+		{"pr view number", []string{"pr", "view", "42", "--json", "number"}, true, false, "", ""},
+		{"pr view after flags", []string{"pr", "view", "--json=title", "-c", "feature"}, true, false, "", ""},
+		{"pr checks unknown flag", []string{"pr", "checks", "--future", "x"}, false, false, "", ""},
+		{"pr status", []string{"pr", "status"}, false, false, "", ""},
+		{"run view", []string{"run", "view", "7"}, true, false, "", ""},
+		{"run list", []string{"run", "list", "--limit", "5"}, true, false, "", ""},
+		{"issue view -R", []string{"issue", "view", "1", "-R", "o/r"}, true, true, "", "o/r"},
+		{"repo flag with host", []string{"run", "list", "--repo=ghe.io/o/r"}, true, true, "ghe.io", "o/r"},
+		{"search", []string{"search", "repos", "ghx"}, true, true, "", ""},
+		{"api user", []string{"api", "user"}, true, true, "", ""},
+		{"api explicit repo", []string{"api", "/repos/o/r/actions/runs?per_page=5"}, true, true, "", "o/r"},
+		{"api repo with query", []string{"api", "repos/o/r?x=1"}, true, true, "", "o/r"},
+		{"api placeholders", []string{"api", "repos/{owner}/{repo}/pulls"}, true, false, "", ""},
+		{"api branch placeholder", []string{"api", "repos/o/r/branches/{branch}"}, false, false, "", "o/r"},
+		{"api hostname", []string{"api", "--hostname", "ghe.io", "user"}, true, true, "ghe.io", ""},
+		{"additional cacheable is conservative", []string{"status"}, false, false, "", ""},
+	}
+	c = NewClassifier([]string{"status"})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := c.Classify(tt.args)
+			if got.IgnoreBranch != tt.ignoreBranch || got.IgnoreRepo != tt.ignoreRepo || got.TargetHost != tt.host || got.TargetRepo != tt.repo {
+				t.Fatalf("Classify(%q) = %+v", tt.args, got)
+			}
+		})
+	}
+}
+
+func TestMutationTargetsExplicitRepo(t *testing.T) {
+	c := NewClassifier(nil)
+	cl := c.Classify([]string{"pr", "merge", "1", "-R", "o/r"})
+	if host, repo := cl.Target("github.com", "cwd/repo"); host != "github.com" || repo != "o/r" {
+		t.Fatalf("Target = %s %s", host, repo)
+	}
+	cl = c.Classify([]string{"api", "-X", "POST", "repos/o/r/issues"})
+	if _, repo := cl.Target("github.com", "cwd/repo"); repo != "o/r" {
+		t.Fatalf("api Target repo = %s", repo)
+	}
+}
+
+func TestLifetimeHints(t *testing.T) {
+	c := NewClassifier(nil)
+	sha := "0123456789abcdef0123456789abcdef01234567"
+	tests := []struct {
+		args               []string
+		immutable, settles bool
+	}{
+		{[]string{"api", "repos/o/r/commits/" + sha}, true, false},
+		{[]string{"api", "/repos/o/r/git/trees/" + sha + "?recursive=1"}, true, false},
+		{[]string{"api", "repos/o/r/commits/" + sha + "/check-runs"}, false, false},
+		{[]string{"api", "repos/o/r/commits/main"}, false, false},
+		{[]string{"api", "repos/{owner}/{repo}/commits/" + sha}, false, false},
+		{[]string{"api", "repos/o/r/actions/runs/123"}, false, true},
+		{[]string{"api", "repos/o/r/actions/jobs/456?x=1"}, false, true},
+		{[]string{"api", "repos/o/r/actions/runs/123/jobs"}, false, false},
+		{[]string{"run", "view", "123", "--json", "status"}, false, true},
+		{[]string{"run", "view", "--json", "status"}, false, false},
+		{[]string{"run", "list"}, false, false},
+	}
+	for _, tt := range tests {
+		got := c.Classify(tt.args)
+		if got.Immutable != tt.immutable || got.Settles != tt.settles {
+			t.Errorf("Classify(%q) immutable=%v settles=%v, want %v %v", tt.args, got.Immutable, got.Settles, tt.immutable, tt.settles)
+		}
 	}
 }

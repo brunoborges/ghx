@@ -124,7 +124,7 @@ ghx xcache keys              # List cached keys (debugging)
 ## Per-command overrides
 
 ```bash
-ghx --no-cache pr list ...  # Bypass cache for this call
+ghx --no-cache pr list ...  # Fetch fresh data (also refreshes the cache for others)
 ghx --ttl 120 pr list ...   # Override TTL to 120 seconds
 ```
 

@@ -68,6 +68,7 @@ func main() {
 	if classification.Type == allowlist.Mutation {
 		cmd := exec.Command(cfg.GHPath, ghArgs...)
 		cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
+		ctx.Host, ctx.Repo = classification.Target(ctx.Host, ctx.Repo)
 		req := &protocol.Request{Type: protocol.TypeFlush, Context: ctx, Resource: classification.Resource}
 		os.Exit(runMutation(cmd, req, client.New(cfg.SocketPath).Send))
 	}

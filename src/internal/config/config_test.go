@@ -153,3 +153,10 @@ func TestLoadEnvironmentOverrides(t *testing.T) {
 		})
 	}
 }
+
+func TestLifetimeTTLDefaults(t *testing.T) {
+	cfg := DefaultConfig()
+	if cfg.ImmutableTTL != time.Hour || cfg.SettledTTL != 10*time.Minute {
+		t.Fatalf("ImmutableTTL=%v SettledTTL=%v", cfg.ImmutableTTL, cfg.SettledTTL)
+	}
+}
