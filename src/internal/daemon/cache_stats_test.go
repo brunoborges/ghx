@@ -77,7 +77,9 @@ func TestServerCacheStatsTransports(t *testing.T) {
 						data = resp.Stdout
 					} else {
 						recorder := httptest.NewRecorder()
-						s.httpHandler().ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/api/stats", nil))
+						req := httptest.NewRequest(http.MethodGet, "/api/stats", nil)
+						req.Host = "127.0.0.1:9847"
+						s.httpHandler().ServeHTTP(recorder, req)
 						if recorder.Code != http.StatusOK {
 							t.Fatalf("HTTP status = %d, want 200", recorder.Code)
 						}

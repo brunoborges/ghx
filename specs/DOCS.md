@@ -362,6 +362,14 @@ It shows:
 - **Per-command breakdown** with hit/miss rates and average latency
 - **Request log** — live tail of recent requests with cache result and timing
 
+By default the request log shows only the command name (e.g. `pr list`). To see the full
+arguments of each request — and, when `--jq`/`--json` normalization applies, the shape that
+was actually fetched from GitHub — opt in with `log_args: true` in `config.yaml` or
+`GHX_LOG_ARGS=1`. Arguments are kept in memory only (the last 200 requests) and are redacted
+before they are stored: header values (`-H`), request bodies (`--input`, `--body`,
+`--body-file`), sensitive-looking fields (`-f token=…`, `-f password=…`, `@file` values),
+and anything that looks like a GitHub token, JWT, or `Bearer`/`token` credential.
+
 The dashboard auto-refreshes every 2 seconds. No external dependencies — it's a single HTML page embedded in the binary.
 
 ### JSON API
@@ -373,6 +381,13 @@ curl http://localhost:9847/api/stats | jq .
 curl http://localhost:9847/api/log?limit=50 | jq .
 curl http://localhost:9847/api/ttl-analysis | jq .
 ```
+
+With `log_args` enabled, each `/api/log` entry also carries `args` (redacted) and, when it
+differs, `fetch` (the normalized command that was executed).
+
+The dashboard only answers requests addressed to a loopback host (`127.0.0.1`, `localhost`,
+`::1`), sends no CORS headers, and rejects state-changing requests (`/api/flush`,
+`/api/shutdown`) that carry a cross-site `Origin`. Local scripts like `curl` keep working.
 
 ## What Gets Cached
 
@@ -520,6 +535,10 @@ dashboard_port: 9847
 # Auto-start daemon on first ghx call (default: true)
 auto_start: true
 
+# Show full (redacted) command arguments in the dashboard request log
+# (default: false; env: GHX_LOG_ARGS=1)
+log_args: false
+
 # Additional commands to cache
 additional_cacheable:
   - "gh status"
@@ -576,7 +595,9 @@ separately by the entry limit, and executing commands still need working memory.
 
 - Unix socket with `0600` permissions (owner-only access)
 - Auth tokens are never stored — only a SHA256 fingerprint is used in cache keys
-- Dashboard binds to `127.0.0.1` only (not accessible from network)
+- Dashboard binds to `127.0.0.1` only (not accessible from network), rejects non-loopback
+  `Host` headers (DNS rebinding), sends no CORS headers, and refuses cross-site POSTs
+- Command arguments are only recorded when `log_args` is enabled, and are redacted first
 - In-memory cache only (lost on daemon restart)
 - Each user runs their own isolated daemon
 

@@ -289,15 +289,17 @@ A single self-contained HTML page (embedded in the Go binary via `embed`) with n
 
 1. **Overview** — real-time hit rate %, total requests, cache size, daemon uptime
 2. **Per-Command Breakdown** — sortable table showing each command with hit count, miss count, hit rate, and average latency
-3. **Request Log** — scrollable live tail of recent requests (last 200) showing timestamp, command, cache hit/miss, and latency
+3. **Request Log** — scrollable live tail of recent requests (last 200) showing timestamp, command, cache hit/miss, and latency. With `log_args: true`, also shows the full redacted arguments and the normalized fetch command
 4. **TTL Analysis** — for each command, shows the median time between repeated identical requests, helping users pick the right TTL
 
 **JSON API** (consumed by the dashboard, also useful for scripting):
 
 ```
 GET /api/stats          → { uptime, total, hits, misses, passthrough, coalesced, cache_size, commands: [...] }
-GET /api/log?limit=200  → [ { timestamp, command, cache_result, latency_ms }, ... ]
+GET /api/log?limit=200  → [ { timestamp, command, cache_key, result, latency_ms, args?, fetch? }, ... ]
 ```
+
+`args`/`fetch` are present only when `log_args` is enabled. The HTTP server rejects requests whose `Host` is not loopback, emits no CORS headers, and rejects non-GET requests with a cross-site `Origin`.
 
 ## Configuration File
 
@@ -340,6 +342,9 @@ gh_path: /opt/homebrew/bin/gh
 
 # Logging
 log_file: ~/.ghx/ghxd.log
+
+# Show full (redacted) command args in the dashboard request log (env: GHX_LOG_ARGS)
+log_args: false
 ```
 
 ## GitHub CLI Resolution and Auto-Download
@@ -418,8 +423,8 @@ Staleness checks only apply to the managed binary. If `gh` was found in PATH or 
 2. **No token storage**: The daemon never stores auth tokens; it delegates to `gh` which manages its own auth. Only a SHA256 fingerprint of the token is used in cache keys
 3. **No cross-user sharing**: Each user runs their own daemon with their own cache
 4. **Cached data**: Responses may contain private repo data. The in-memory cache is ephemeral and protected by socket permissions
-5. **Dashboard binding**: Metrics/dashboard HTTP server binds to `127.0.0.1` only
-6. **Log hygiene**: Command arguments are logged, but response bodies are not logged by default
+5. **Dashboard binding**: Metrics/dashboard HTTP server binds to `127.0.0.1` only, rejects non-loopback `Host` headers (DNS rebinding), sends no CORS headers, and rejects cross-site `Origin` on POST endpoints
+6. **Log hygiene**: Response bodies are never logged. Full command arguments are recorded in the in-memory request log only when `log_args` is enabled, and are redacted first (header values, request bodies, sensitive `-f` fields, token/JWT patterns)
 
 ## Error Handling
 

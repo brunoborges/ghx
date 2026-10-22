@@ -23,6 +23,10 @@ type LogEntry struct {
 	CacheKey  string        `json:"cache_key,omitempty"`
 	Result    RequestResult `json:"result"`
 	LatencyMs float64       `json:"latency_ms"`
+	// Args and Fetch are only populated when argument logging is enabled.
+	// Fetch is the command actually executed and cached, when it differs.
+	Args  []string `json:"args,omitempty"`
+	Fetch []string `json:"fetch,omitempty"`
 }
 
 // CommandStats tracks per-command hit/miss statistics.
@@ -77,6 +81,12 @@ func New() *Stats {
 
 // Record logs a request and updates counters.
 func (s *Stats) Record(cmdKey string, cacheKey string, result RequestResult, latencyMs float64) {
+	s.RecordDetailed(cmdKey, cacheKey, result, latencyMs, nil, nil)
+}
+
+// RecordDetailed is Record with the command's arguments attached to the log
+// entry. Callers are responsible for redacting them (see RedactArgs).
+func (s *Stats) RecordDetailed(cmdKey string, cacheKey string, result RequestResult, latencyMs float64, args, fetch []string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -130,6 +140,8 @@ func (s *Stats) Record(cmdKey string, cacheKey string, result RequestResult, lat
 		CacheKey:  cacheKey,
 		Result:    result,
 		LatencyMs: latencyMs,
+		Args:      args,
+		Fetch:     fetch,
 	}
 	if len(s.log) >= s.maxLog {
 		s.log = s.log[1:]

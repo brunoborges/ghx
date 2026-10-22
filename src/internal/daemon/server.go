@@ -7,10 +7,12 @@ import (
 	"log"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -236,10 +238,10 @@ func (s *Server) httpHandler() http.Handler {
 		snap := s.handler.snapshot()
 		resp := struct {
 			Version string `json:"version"`
+			LogArgs bool   `json:"log_args"`
 			cacheSnapshot
-		}{s.version, snap}
+		}{s.version, s.cfg.LogArgs, snap}
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		json.NewEncoder(w).Encode(resp)
 	})
 
@@ -257,18 +259,16 @@ func (s *Server) httpHandler() http.Handler {
 		}
 		entries := s.stats.Log(limit)
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		json.NewEncoder(w).Encode(entries)
 	})
 
 	mux.HandleFunc("/api/ttl-analysis", func(w http.ResponseWriter, r *http.Request) {
 		recs := s.stats.TTLAnalysis()
 		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Access-Control-Allow-Origin", "*")
 		json.NewEncoder(w).Encode(recs)
 	})
 
-	// Mutating endpoints — POST only, origin-validated
+	// Mutating endpoints: POST only, origin-validated by localOnly
 	mux.HandleFunc("/api/flush", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
 			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -295,7 +295,41 @@ func (s *Server) httpHandler() http.Handler {
 		}()
 	})
 
-	return mux
+	return localOnly(mux)
+}
+
+// localOnly rejects requests that did not come from a page or client talking
+// to the loopback address directly. Checking Host defeats DNS rebinding, and
+// checking Origin on writes stops other sites from triggering flush/shutdown.
+func localOnly(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !isLoopbackHost(r.Host) {
+			http.Error(w, "forbidden host", http.StatusForbidden)
+			return
+		}
+		if r.Method != http.MethodGet && r.Method != http.MethodHead {
+			if origin := r.Header.Get("Origin"); origin != "" {
+				u, err := url.Parse(origin)
+				if err != nil || u.Host != r.Host || !isLoopbackHost(u.Host) {
+					http.Error(w, "forbidden origin", http.StatusForbidden)
+					return
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isLoopbackHost(hostport string) bool {
+	host := hostport
+	if h, _, err := net.SplitHostPort(hostport); err == nil {
+		host = h
+	}
+	switch strings.ToLower(host) {
+	case "127.0.0.1", "localhost", "::1":
+		return true
+	}
+	return false
 }
 
 // Shutdown gracefully stops the daemon.

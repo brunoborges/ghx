@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"gopkg.in/yaml.v3"
@@ -22,6 +23,7 @@ type Config struct {
 	DashboardPort   int                      `yaml:"dashboard_port"`
 	GHPath          string                   `yaml:"gh_path"`
 	LogFile         string                   `yaml:"log_file"`
+	LogArgs         bool                     `yaml:"log_args"` // keep redacted command arguments in the in-memory request log
 }
 
 func DefaultConfig() *Config {
@@ -70,6 +72,9 @@ func Load() (*Config, error) {
 	}
 	if v := os.Getenv("GHX_GH_PATH"); v != "" {
 		cfg.GHPath = v
+	}
+	if v := os.Getenv("GHX_LOG_ARGS"); v != "" {
+		cfg.LogArgs = v == "1" || strings.EqualFold(v, "true")
 	}
 
 	return cfg, nil

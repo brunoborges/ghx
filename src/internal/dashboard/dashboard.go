@@ -65,6 +65,9 @@ const dashboardHTML = `<!DOCTYPE html>
   .log-container { max-height: 400px; overflow-y: auto; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; }
   .log-entry { padding: 6px 14px; font-size: 12px; font-family: monospace; border-bottom: 1px solid var(--border); display: flex; gap: 12px; }
   .log-entry:last-child { border-bottom: none; }
+  .log-entry { flex-wrap: wrap; }
+  .log-args { flex-basis: 100%; color: var(--text-dimmer); white-space: pre-wrap; word-break: break-all; padding-left: 4px; }
+  .log-args .fetch { display: block; opacity: 0.8; }
   .log-time { color: var(--text-dim); min-width: 80px; }
   .log-cmd { flex: 1; }
   .log-key { color: var(--text-dimmer); min-width: 90px; max-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: default; }
@@ -134,7 +137,7 @@ const dashboardHTML = `<!DOCTYPE html>
 
 <div class="section">
   <h2>Request Log</h2>
-  <div class="refresh-info">Auto-refreshes every 2s</div>
+  <div class="refresh-info">Auto-refreshes every 2s<span id="logargsHint" hidden> · Set <code>log_args: true</code> in <code>~/.ghx/config.yaml</code> (or <code>GHX_LOG_ARGS=1</code>) and restart the daemon to see full, redacted commands</span></div>
   <div class="log-container" id="logcontainer"></div>
 </div>
 
@@ -177,6 +180,7 @@ function renderStats(s) {
   $('#hitrate').textContent = fmtPct(s.hit_rate);
   $('#hitbar').style.width = (s.hit_rate || 0) + '%';
   $('#cachesize').textContent = s.cache_size + ' / ' + s.max_cache_size;
+  $('#logargsHint').hidden = !!s.log_args;
 
   const tbody = $('#cmdtable tbody');
   tbody.innerHTML = '';
@@ -187,30 +191,46 @@ function renderStats(s) {
       const rate = total > 0 ? (c.hits / total * 100) : 0;
       const avg = c.request_count > 0 ? c.total_latency_ms / c.request_count : 0;
       const tr = document.createElement('tr');
-      tr.innerHTML =
-        '<td><code>' + name.replace(/_/g, ' ') + '</code></td>' +
-        '<td class="hit">' + fmtNum(c.hits) + '</td>' +
-        '<td class="miss">' + fmtNum(c.misses) + '</td>' +
-        '<td>' + fmtPct(rate) + '</td>' +
-        '<td>' + fmtMs(avg) + '</td>';
+      const code = el('code', '', name.replace(/_/g, ' '));
+      const first = el('td');
+      first.appendChild(code);
+      tr.append(first, el('td', 'hit', fmtNum(c.hits)), el('td', 'miss', fmtNum(c.misses)),
+        el('td', '', fmtPct(rate)), el('td', '', fmtMs(avg)));
       tbody.appendChild(tr);
     }
   }
 }
 
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+}
+
+function shellJoin(args) {
+  return args.map(a => /^[\w@%+=:,.\/-]+$/.test(a) ? a : "'" + a.replace(/'/g, "'\\''") + "'").join(' ');
+}
+
 function renderLog(entries) {
   const container = $('#logcontainer');
-  container.innerHTML = '';
+  container.replaceChildren();
   if (!entries) return;
   for (const e of entries) {
-    const div = document.createElement('div');
-    div.className = 'log-entry';
-    div.innerHTML =
-      '<span class="log-time">' + fmtTime(e.timestamp) + '</span>' +
-      '<span class="log-cmd">' + e.command.replace(/_/g, ' ') + '</span>' +
-      '<span class="log-key" title="' + (e.cache_key || '') + '">' + (e.cache_key ? e.cache_key.slice(0, 12) + '…' : '—') + '</span>' +
-      '<span class="badge ' + e.result + '">' + e.result + '</span>' +
-      '<span class="log-latency">' + fmtMs(e.latency_ms) + '</span>';
+    const div = el('div', 'log-entry');
+    const key = el('span', 'log-key', e.cache_key ? e.cache_key.slice(0, 12) + '…' : '—');
+    key.title = e.cache_key || '';
+    div.append(
+      el('span', 'log-time', fmtTime(e.timestamp)),
+      el('span', 'log-cmd', e.command.replace(/_/g, ' ')),
+      key,
+      el('span', 'badge ' + e.result, e.result),
+      el('span', 'log-latency', fmtMs(e.latency_ms)));
+    if (e.args) {
+      const args = el('span', 'log-args', 'gh ' + shellJoin(e.args));
+      if (e.fetch) args.appendChild(el('span', 'fetch', '↳ fetched as: gh ' + shellJoin(e.fetch)));
+      div.appendChild(args);
+    }
     container.appendChild(div);
   }
   container.scrollTop = container.scrollHeight;
