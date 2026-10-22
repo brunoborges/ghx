@@ -137,7 +137,7 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 	}
 
 	// Non-cacheable: execute directly via daemon (captures output)
-	if classification.Type == allowlist.Passthrough || req.NoCache {
+	if classification.Type == allowlist.Passthrough {
 		result := h.execGH(req.Args, req.WorkDir, req.AuthEnv)
 		latency := time.Since(start).Seconds() * 1000
 		h.stats.Record(cmdKey, "", metrics.ResultPassthrough, latency)
@@ -151,6 +151,15 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 
 	// Cacheable: check cache → singleflight → execute → store
 	cacheKey := execctx.CacheKey(req.Context, req.Args)
+
+	// --no-cache skips the lookup (and in-flight calls that may predate the
+	// request) but still stores the fresh result so other callers reuse it.
+	if req.NoCache {
+		result := h.execGH(req.Args, req.WorkDir, req.AuthEnv)
+		h.stats.Record(cmdKey, cacheKey, metrics.ResultMiss, time.Since(start).Seconds()*1000)
+		h.store(cacheKey, cmdKey, classification, req, result)
+		return &protocol.Response{Stdout: result.Stdout, Stderr: result.Stderr, ExitCode: result.ExitCode}
+	}
 
 	// Check cache
 	if entry := h.cache.Get(cacheKey); entry != nil {
@@ -174,7 +183,16 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 		h.stats.Record(cmdKey, cacheKey, metrics.ResultMiss, latency)
 	}
 
-	// Store in cache
+	h.store(cacheKey, cmdKey, classification, req, result)
+
+	return &protocol.Response{
+		Stdout:   result.Stdout,
+		Stderr:   result.Stderr,
+		ExitCode: result.ExitCode,
+	}
+}
+
+func (h *Handler) store(cacheKey, cmdKey string, classification allowlist.Classification, req *protocol.Request, result *executor.Result) {
 	ttl := h.cfg.CommandTTL(cmdKey)
 	if req.TTLOverride > 0 {
 		ttl = time.Duration(req.TTLOverride) * time.Second
@@ -191,12 +209,6 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 		Host:     req.Context.Host,
 		Repo:     req.Context.Repo,
 	})
-
-	return &protocol.Response{
-		Stdout:   result.Stdout,
-		Stderr:   result.Stderr,
-		ExitCode: result.ExitCode,
-	}
 }
 
 func (h *Handler) doSingleflight(key string, req *protocol.Request) (*executor.Result, bool) {

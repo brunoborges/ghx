@@ -446,3 +446,38 @@ func TestHandlerInvalidationCrossesAPINamespace(t *testing.T) {
 		})
 	}
 }
+
+func TestHandlerNoCacheRefreshesSharedEntry(t *testing.T) {
+	h := newTestHandler()
+	value, calls := "v1", 0
+	h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+		calls++
+		return &executor.Result{Stdout: []byte(value)}
+	}
+	ctx := execctx.ExecContext{Host: "github.com", Repo: "owner/repo"}
+	read := func(noCache bool) *protocol.Response {
+		return h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"run", "view", "7"}, Context: ctx, NoCache: noCache})
+	}
+	read(false)
+	value = "v2"
+	if got := read(true); got.Cached || string(got.Stdout) != "v2" {
+		t.Fatalf("no-cache read = %+v, want fresh v2", got)
+	}
+	if got := read(false); !got.Cached || string(got.Stdout) != "v2" {
+		t.Fatalf("follow-up read = %+v, want cached v2", got)
+	}
+	if calls != 2 {
+		t.Fatalf("executions = %d, want 2", calls)
+	}
+}
+
+func TestHandlerNoCachePassthroughIsNotStored(t *testing.T) {
+	h := newTestHandler()
+	h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+		return &executor.Result{Stdout: []byte("x")}
+	}
+	h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"run", "watch", "7"}, NoCache: true})
+	if h.cache.Size() != 0 {
+		t.Fatalf("passthrough stored: %v", h.cache.Keys())
+	}
+}
