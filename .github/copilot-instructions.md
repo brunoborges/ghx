@@ -86,6 +86,8 @@ The `agent-plugin/` directory contains a Claude Code / Copilot CLI plugin:
 
 ## Release Process
 
+See [`RELEASE.md`](../RELEASE.md) for the full maintainer guide.
+
 - **App release**: Run the `Release` workflow from main (`gh workflow run release.yml -f bump=patch|minor|major`, or `-f version=vX.Y.Z`) or push a `v*` tag. `release.yml` resolves the version, runs the full `ci.yml` (reusable via `workflow_call`) on the exact commit, and only then builds multi-arch archives, creates the tag (manual runs), publishes the GitHub release, and updates the Homebrew tap
 - **Plugin release**: Push a `plugin-v*` tag → `release-plugin.yml` validates structure and packages plugin tarball
 - Install scripts must filter out `plugin-v*` tags when resolving "latest version" since GitHub's `/releases/latest` API doesn't distinguish tag prefixes
