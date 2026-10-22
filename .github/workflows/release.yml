@@ -4,33 +4,104 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump from the latest v* tag
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+      version:
+        description: Explicit version (e.g. v2.0.0-rc.1); overrides bump
+        type: string
+        required: false
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  release:
+  prepare:
     runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      sha: ${{ steps.version.outputs.sha }}
     steps:
       - uses: actions/checkout@v4
         with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: version
+        env:
+          EVENT: ${{ github.event_name }}
+          BUMP: ${{ inputs.bump }}
+          INPUT_VERSION: ${{ inputs.version }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+              echo "Manual releases must run from main (got $GITHUB_REF)" >&2
+              exit 1
+            fi
+            if [ -n "$INPUT_VERSION" ]; then
+              VERSION="$INPUT_VERSION"
+            else
+              # Ignore plugin-v* and pre-release tags when finding the latest version
+              LATEST=$(git tag -l 'v*' --sort=-v:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | head -1)
+              LATEST=${LATEST:-v0.0.0}
+              IFS=. read -r MAJOR MINOR PATCH <<< "${LATEST#v}"
+              case "$BUMP" in
+                major) VERSION="v$((MAJOR + 1)).0.0" ;;
+                minor) VERSION="v${MAJOR}.$((MINOR + 1)).0" ;;
+                *)     VERSION="v${MAJOR}.${MINOR}.$((PATCH + 1))" ;;
+              esac
+              echo "Latest release: $LATEST"
+            fi
+            if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+              echo "Tag $VERSION already exists" >&2
+              exit 1
+            fi
+          else
+            VERSION="$GITHUB_REF_NAME"
+          fi
+          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
+            echo "Invalid release version: $VERSION" >&2
+            exit 1
+          fi
+          echo "Releasing $VERSION from $(git rev-parse HEAD)" | tee -a "$GITHUB_STEP_SUMMARY"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  ci:
+    needs: prepare
+    uses: ./.github/workflows/ci.yml
+    with:
+      ref: ${{ needs.prepare.outputs.sha }}
+
+  release:
+    needs: [prepare, ci]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.prepare.outputs.version }}
+      SHA: ${{ needs.prepare.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.sha }}
           fetch-depth: 0
 
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
 
-      - name: Run tests
-        run: go test -race ./...
-
       - name: Build release archives
         id: build
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
-          if [[ ! "$VERSION" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]]; then
-            echo "Invalid release version: $VERSION" >&2
-            exit 1
-          fi
           LDFLAGS="-s -w -X main.version=${VERSION}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "version_num=${VERSION#v}" >> "$GITHUB_OUTPUT"
@@ -46,7 +117,7 @@ jobs:
 
           mkdir dist
           jq -n --arg version "$VERSION" \
-            --arg commit "$(git rev-parse HEAD)" \
+            --arg commit "$SHA" \
             --arg go_version "$(go env GOVERSION)" \
             --args '{version: $version, commit: $commit, go_version: $go_version, platforms: $ARGS.positional}' \
             "${platforms[@]}" > dist/source.json
@@ -91,9 +162,18 @@ jobs:
             echo "SHA_${platform}=${sum}" >> "$GITHUB_OUTPUT"
           done
 
+      - name: Create tag
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$VERSION" -m "$VERSION" "$SHA"
+          git push origin "refs/tags/$VERSION"
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ needs.prepare.outputs.version }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |
@@ -103,7 +183,7 @@ jobs:
             dist/source.json
 
       - name: Update Homebrew tap
-        if: github.repository == 'brunoborges/ghx' && !contains(github.ref_name, '-')
+        if: github.repository == 'brunoborges/ghx' && !contains(needs.prepare.outputs.version, '-')
         env:
           TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
         run: |
