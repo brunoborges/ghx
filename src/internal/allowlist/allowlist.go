@@ -1,6 +1,9 @@
 package allowlist
 
-import "strings"
+import (
+	"regexp"
+	"strings"
+)
 
 // CommandType classifies a gh command.
 type CommandType int
@@ -46,6 +49,10 @@ type Classification struct {
 	IgnoreRepo   bool   // output does not depend on the current git repo
 	TargetHost   string // host named explicitly by the command, if any
 	TargetRepo   string // owner/repo named explicitly by the command, if any
+
+	// Lifetime hints for longer TTLs.
+	Immutable bool // output is addressed by a commit SHA and cannot change
+	Settles   bool // output describes one run/job and is final once "status" is "completed"
 }
 
 // cacheableCommands maps "subcommand action" to resource type.
@@ -252,6 +259,7 @@ func (c *Classifier) Classify(args []string) Classification {
 			CmdKey:   strings.ReplaceAll(key, " ", "_"),
 		}
 		applyScope(&cl, key, args[2:])
+		cl.Settles = key == "run view" && len(args) > 2 && isDigits(args[2])
 		return cl
 	}
 
@@ -358,7 +366,28 @@ func (c *Classifier) classifyAPI(args []string) Classification {
 	if !strings.EqualFold(method, "GET") {
 		return mutation
 	}
-	return apiScope(Classification{Type: Cacheable, Resource: ResourceAPI, CmdKey: "api_get"}, args, endpoint, hostname)
+	cl := apiScope(Classification{Type: Cacheable, Resource: ResourceAPI, CmdKey: "api_get"}, args, endpoint, hostname)
+	path, query, _ := strings.Cut(strings.TrimPrefix(endpoint, "/"), "?")
+	cl.Immutable = shaAddressedPath.MatchString(path) && !strings.Contains(query, "ref=")
+	cl.Settles = settlingPath.MatchString(path)
+	return cl
+}
+
+var (
+	shaAddressedPath = regexp.MustCompile(`^repos/[^/{}]+/[^/{}]+/(commits|git/commits|git/trees|git/blobs)/[0-9a-fA-F]{40}$`)
+	settlingPath     = regexp.MustCompile(`^repos/[^/]+/[^/]+/actions/(runs|jobs)/[0-9]+$`)
+)
+
+func isDigits(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // branchDefaultCommands fall back to the current branch's pull request (or the

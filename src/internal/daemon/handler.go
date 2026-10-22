@@ -197,6 +197,12 @@ func (h *Handler) store(cacheKey, cmdKey string, classification allowlist.Classi
 	ttl := h.cfg.CommandTTL(cmdKey)
 	if req.TTLOverride > 0 {
 		ttl = time.Duration(req.TTLOverride) * time.Second
+	} else if _, overridden := h.cfg.TTLOverrides[cmdKey]; !overridden && result.ExitCode == 0 {
+		if classification.Immutable && h.cfg.ImmutableTTL > ttl {
+			ttl = h.cfg.ImmutableTTL
+		} else if classification.Settles && h.cfg.SettledTTL > ttl && reportsCompleted(result.Stdout) {
+			ttl = h.cfg.SettledTTL
+		}
 	}
 
 	host, repo := classification.Target(req.Context.Host, req.Context.Repo)
@@ -211,6 +217,15 @@ func (h *Handler) store(cacheKey, cmdKey string, classification allowlist.Classi
 		Host:     host,
 		Repo:     repo,
 	})
+}
+
+// reportsCompleted reports whether stdout is a JSON object whose top-level
+// "status" is "completed" (the terminal state for Actions runs and jobs).
+func reportsCompleted(stdout []byte) bool {
+	var v struct {
+		Status string `json:"status"`
+	}
+	return json.Unmarshal(stdout, &v) == nil && v.Status == "completed"
 }
 
 // keyContext drops context the command's output cannot depend on, so callers

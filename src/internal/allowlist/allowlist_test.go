@@ -259,3 +259,30 @@ func TestMutationTargetsExplicitRepo(t *testing.T) {
 		t.Fatalf("api Target repo = %s", repo)
 	}
 }
+
+func TestLifetimeHints(t *testing.T) {
+	c := NewClassifier(nil)
+	sha := "0123456789abcdef0123456789abcdef01234567"
+	tests := []struct {
+		args               []string
+		immutable, settles bool
+	}{
+		{[]string{"api", "repos/o/r/commits/" + sha}, true, false},
+		{[]string{"api", "/repos/o/r/git/trees/" + sha + "?recursive=1"}, true, false},
+		{[]string{"api", "repos/o/r/commits/" + sha + "/check-runs"}, false, false},
+		{[]string{"api", "repos/o/r/commits/main"}, false, false},
+		{[]string{"api", "repos/{owner}/{repo}/commits/" + sha}, false, false},
+		{[]string{"api", "repos/o/r/actions/runs/123"}, false, true},
+		{[]string{"api", "repos/o/r/actions/jobs/456?x=1"}, false, true},
+		{[]string{"api", "repos/o/r/actions/runs/123/jobs"}, false, false},
+		{[]string{"run", "view", "123", "--json", "status"}, false, true},
+		{[]string{"run", "view", "--json", "status"}, false, false},
+		{[]string{"run", "list"}, false, false},
+	}
+	for _, tt := range tests {
+		got := c.Classify(tt.args)
+		if got.Immutable != tt.immutable || got.Settles != tt.settles {
+			t.Errorf("Classify(%q) immutable=%v settles=%v, want %v %v", tt.args, got.Immutable, got.Settles, tt.immutable, tt.settles)
+		}
+	}
+}

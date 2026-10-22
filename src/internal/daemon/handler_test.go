@@ -536,3 +536,45 @@ func TestHandlerExplicitRepoMutationInvalidatesTarget(t *testing.T) {
 		t.Fatal("api read of o/r survived a pr merge targeting o/r")
 	}
 }
+
+func TestHandlerLifetimeTTLs(t *testing.T) {
+	sha := "0123456789abcdef0123456789abcdef01234567"
+	tests := []struct {
+		name     string
+		args     []string
+		stdout   string
+		exitCode int
+		override bool
+		ttlFlag  int
+		want     time.Duration
+	}{
+		{"sha addressed", []string{"api", "repos/o/r/commits/" + sha}, `{"sha":"x"}`, 0, false, 0, time.Hour},
+		{"sha addressed failure", []string{"api", "repos/o/r/commits/" + sha}, `{}`, 1, false, 0, 30 * time.Second},
+		{"completed run", []string{"run", "view", "9", "--json", "status"}, `{"status":"completed"}`, 0, false, 0, 10 * time.Minute},
+		{"in-progress run", []string{"run", "view", "9", "--json", "status"}, `{"status":"in_progress"}`, 0, false, 0, 30 * time.Second},
+		{"completed job via api", []string{"api", "repos/o/r/actions/jobs/1"}, `{"status":"completed","conclusion":"success"}`, 0, false, 0, 10 * time.Minute},
+		{"config override wins", []string{"run", "view", "9", "--json", "status"}, `{"status":"completed"}`, 0, true, 0, 5 * time.Second},
+		{"request ttl wins", []string{"run", "view", "9", "--json", "status"}, `{"status":"completed"}`, 0, false, 3, 3 * time.Second},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newTestHandler()
+			h.cfg.ImmutableTTL, h.cfg.SettledTTL = time.Hour, 10*time.Minute
+			h.cfg.TTLOverrides = map[string]time.Duration{}
+			if tt.override {
+				h.cfg.TTLOverrides["run_view"] = 5 * time.Second
+			}
+			h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+				return &executor.Result{Stdout: []byte(tt.stdout), ExitCode: tt.exitCode}
+			}
+			h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: tt.args, TTLOverride: tt.ttlFlag})
+			keys := h.cache.Keys()
+			if len(keys) != 1 {
+				t.Fatalf("keys = %v", keys)
+			}
+			if got := h.cache.Get(keys[0]).TTL; got != tt.want {
+				t.Fatalf("TTL = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
