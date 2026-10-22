@@ -3,7 +3,9 @@ package daemon
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"os"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -576,5 +578,109 @@ func TestHandlerLifetimeTTLs(t *testing.T) {
 				t.Fatalf("TTL = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+// fakeJSONGH emulates gh --json output for the requested (sorted) fields.
+func fakeJSONGH(calls *[][]string) func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+	data := map[string]string{"number": "7", "state": `"OPEN"`, "title": `"a<b"`}
+	return func(_ context.Context, _ string, args []string, _ string, _ authenv.Environment) *executor.Result {
+		*calls = append(*calls, append([]string(nil), args...))
+		for _, a := range args {
+			if a == "--jq" {
+				return &executor.Result{Stdout: []byte("raw-gh\n")}
+			}
+		}
+		for i, a := range args {
+			if a == "--json" {
+				var parts []string
+				for _, f := range strings.Split(args[i+1], ",") {
+					parts = append(parts, fmt.Sprintf("%q:%s", f, data[f]))
+				}
+				return &executor.Result{Stdout: []byte("{" + strings.Join(parts, ",") + "}\n")}
+			}
+		}
+		return &executor.Result{Stdout: []byte("text\n")}
+	}
+}
+
+func TestHandlerOutputShaping(t *testing.T) {
+	h := newTestHandler()
+	var calls [][]string
+	h.execute = fakeJSONGH(&calls)
+	ctx := execctx.ExecContext{Host: "github.com", Repo: "o/r"}
+	run := func(args ...string) *protocol.Response {
+		return h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: args, Context: ctx})
+	}
+
+	got := run("pr", "view", "7", "--json", "title,state,number")
+	if got.Cached || string(got.Stdout) != `{"number":7,"state":"OPEN","title":"a<b"}`+"\n" {
+		t.Fatalf("first fetch = %q cached=%v", got.Stdout, got.Cached)
+	}
+	if got := run("pr", "view", "7", "--json", "number,state,title", "--jq", ".title"); !got.Cached || string(got.Stdout) != "a<b\n" {
+		t.Fatalf("jq over cached fields = %q cached=%v", got.Stdout, got.Cached)
+	}
+	if got := run("pr", "view", "7", "--json", "state", "-q", ".state"); !got.Cached || string(got.Stdout) != "OPEN\n" {
+		t.Fatalf("superset projection with jq = %q cached=%v", got.Stdout, got.Cached)
+	}
+	if got := run("pr", "view", "7", "--json", "number,title"); !got.Cached || string(got.Stdout) != `{"number":7,"title":"a<b"}`+"\n" {
+		t.Fatalf("superset projection = %q cached=%v", got.Stdout, got.Cached)
+	}
+	if len(calls) != 1 {
+		t.Fatalf("executions = %v, want 1", calls)
+	}
+
+	// A field outside the cached set needs a new fetch.
+	if got := run("pr", "view", "7", "--json", "url"); got.Cached {
+		t.Fatal("uncovered field served from cache")
+	}
+	// Different selectors never share.
+	if got := run("pr", "view", "8", "--json", "state"); got.Cached {
+		t.Fatal("different PR served from cache")
+	}
+}
+
+func TestHandlerJQFallsBackToGH(t *testing.T) {
+	h := newTestHandler()
+	var calls [][]string
+	h.execute = fakeJSONGH(&calls)
+	ctx := execctx.ExecContext{Host: "github.com", Repo: "o/r"}
+	req := &protocol.Request{Type: protocol.TypeExec, Args: []string{"pr", "view", "7", "--json", "state", "--jq", ".state | keys"}, Context: ctx}
+	got := h.Handle(req)
+	if string(got.Stdout) != "raw-gh\n" {
+		t.Fatalf("jq error should rerun gh with original args, got %q", got.Stdout)
+	}
+	if last := calls[len(calls)-1]; strings.Join(last, " ") != strings.Join(req.Args, " ") {
+		t.Fatalf("fallback args = %q", last)
+	}
+
+	h2 := newTestHandler()
+	var argsSeen [][]string
+	h2.execute = func(_ context.Context, _ string, args []string, _ string, _ authenv.Environment) *executor.Result {
+		argsSeen = append(argsSeen, args)
+		return &executor.Result{Stderr: []byte("not found\n"), ExitCode: 1}
+	}
+	got = h2.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"api", "repos/o/r/pulls/9", "--jq", ".id"}, Context: ctx})
+	if got.ExitCode != 1 || len(argsSeen) != 2 || strings.Join(argsSeen[1], " ") != "api repos/o/r/pulls/9 --jq .id" {
+		t.Fatalf("non-zero exit should rerun original args: resp=%+v calls=%q", got, argsSeen)
+	}
+}
+
+func TestHandlerAPIJQSharesResponse(t *testing.T) {
+	h := newTestHandler()
+	calls := 0
+	h.execute = func(_ context.Context, _ string, args []string, _ string, _ authenv.Environment) *executor.Result {
+		calls++
+		return &executor.Result{Stdout: []byte(`{"id":5,"name":"x","tags":["a"]}`)}
+	}
+	ctx := execctx.ExecContext{Host: "github.com", Repo: "o/r"}
+	for _, tc := range []struct{ jq, want string }{{".id", "5\n"}, {".name", "x\n"}, {".tags", `["a"]` + "\n"}} {
+		got := h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"api", "repos/o/r", "--jq", tc.jq}, Context: ctx, NoCache: tc.jq == ".id"})
+		if string(got.Stdout) != tc.want {
+			t.Fatalf("jq %s = %q, want %q", tc.jq, got.Stdout, tc.want)
+		}
+	}
+	if calls != 1 {
+		t.Fatalf("executions = %d, want 1", calls)
 	}
 }

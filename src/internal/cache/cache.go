@@ -98,6 +98,14 @@ func (c *Cache) Get(key string) *Entry {
 	return entry
 }
 
+// Contains reports whether key holds a live entry without affecting LRU order.
+func (c *Cache) Contains(key string) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	elem, ok := c.items[key]
+	return ok && !elem.Value.(*storedEntry).entry.IsExpired()
+}
+
 // Set stores an entry in the cache.
 func (c *Cache) Set(entry *Entry) {
 	c.mu.Lock()
