@@ -126,7 +126,8 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 		h.stats.Record(cmdKey, "", metrics.ResultPassthrough, latency)
 
 		if classification.Resource != allowlist.ResourceUnknown {
-			h.stats.RecordInvalidation(h.invalidate(req.Context.Host, req.Context.Repo, classification.Resource))
+			host, repo := classification.Target(req.Context.Host, req.Context.Repo)
+			h.stats.RecordInvalidation(h.invalidate(host, repo, classification.Resource))
 		}
 
 		return &protocol.Response{
@@ -150,7 +151,7 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 	}
 
 	// Cacheable: check cache → singleflight → execute → store
-	cacheKey := execctx.CacheKey(req.Context, req.Args)
+	cacheKey := execctx.CacheKey(keyContext(req.Context, classification), req.Args)
 
 	// --no-cache skips the lookup (and in-flight calls that may predate the
 	// request) but still stores the fresh result so other callers reuse it.
@@ -198,6 +199,7 @@ func (h *Handler) store(cacheKey, cmdKey string, classification allowlist.Classi
 		ttl = time.Duration(req.TTLOverride) * time.Second
 	}
 
+	host, repo := classification.Target(req.Context.Host, req.Context.Repo)
 	h.cache.Set(&cache.Entry{
 		Key:      cacheKey,
 		Stdout:   result.Stdout,
@@ -206,9 +208,27 @@ func (h *Handler) store(cacheKey, cmdKey string, classification allowlist.Classi
 		CachedAt: time.Now(),
 		TTL:      ttl,
 		Resource: classification.Resource,
-		Host:     req.Context.Host,
-		Repo:     req.Context.Repo,
+		Host:     host,
+		Repo:     repo,
 	})
+}
+
+// keyContext drops context the command's output cannot depend on, so callers
+// in different checkouts or branches share entries.
+func keyContext(ctx execctx.ExecContext, cl allowlist.Classification) execctx.ExecContext {
+	if cl.IgnoreBranch {
+		ctx.Branch = ""
+	}
+	if cl.IgnoreRepo {
+		ctx.Repo = ""
+	}
+	if cl.TargetHost != "" {
+		ctx.Host = cl.TargetHost
+	}
+	if cl.TargetRepo != "" {
+		ctx.Repo = cl.TargetRepo
+	}
+	return ctx
 }
 
 func (h *Handler) doSingleflight(key string, req *protocol.Request) (*executor.Result, bool) {

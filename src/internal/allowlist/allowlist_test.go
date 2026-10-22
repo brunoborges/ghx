@@ -209,3 +209,53 @@ func TestReadOnlyRunCommandsStayPassthrough(t *testing.T) {
 		}
 	}
 }
+
+func TestScopeHints(t *testing.T) {
+	c := NewClassifier(nil)
+	tests := []struct {
+		name                     string
+		args                     []string
+		ignoreBranch, ignoreRepo bool
+		host, repo               string
+	}{
+		{"pr view current branch", []string{"pr", "view"}, false, false, "", ""},
+		{"pr view json only", []string{"pr", "view", "--json", "number"}, false, false, "", ""},
+		{"pr view number", []string{"pr", "view", "42", "--json", "number"}, true, false, "", ""},
+		{"pr view after flags", []string{"pr", "view", "--json=title", "-c", "feature"}, true, false, "", ""},
+		{"pr checks unknown flag", []string{"pr", "checks", "--future", "x"}, false, false, "", ""},
+		{"pr status", []string{"pr", "status"}, false, false, "", ""},
+		{"run view", []string{"run", "view", "7"}, true, false, "", ""},
+		{"run list", []string{"run", "list", "--limit", "5"}, true, false, "", ""},
+		{"issue view -R", []string{"issue", "view", "1", "-R", "o/r"}, true, true, "", "o/r"},
+		{"repo flag with host", []string{"run", "list", "--repo=ghe.io/o/r"}, true, true, "ghe.io", "o/r"},
+		{"search", []string{"search", "repos", "ghx"}, true, true, "", ""},
+		{"api user", []string{"api", "user"}, true, true, "", ""},
+		{"api explicit repo", []string{"api", "/repos/o/r/actions/runs?per_page=5"}, true, true, "", "o/r"},
+		{"api repo with query", []string{"api", "repos/o/r?x=1"}, true, true, "", "o/r"},
+		{"api placeholders", []string{"api", "repos/{owner}/{repo}/pulls"}, true, false, "", ""},
+		{"api branch placeholder", []string{"api", "repos/o/r/branches/{branch}"}, false, false, "", "o/r"},
+		{"api hostname", []string{"api", "--hostname", "ghe.io", "user"}, true, true, "ghe.io", ""},
+		{"additional cacheable is conservative", []string{"status"}, false, false, "", ""},
+	}
+	c = NewClassifier([]string{"status"})
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := c.Classify(tt.args)
+			if got.IgnoreBranch != tt.ignoreBranch || got.IgnoreRepo != tt.ignoreRepo || got.TargetHost != tt.host || got.TargetRepo != tt.repo {
+				t.Fatalf("Classify(%q) = %+v", tt.args, got)
+			}
+		})
+	}
+}
+
+func TestMutationTargetsExplicitRepo(t *testing.T) {
+	c := NewClassifier(nil)
+	cl := c.Classify([]string{"pr", "merge", "1", "-R", "o/r"})
+	if host, repo := cl.Target("github.com", "cwd/repo"); host != "github.com" || repo != "o/r" {
+		t.Fatalf("Target = %s %s", host, repo)
+	}
+	cl = c.Classify([]string{"api", "-X", "POST", "repos/o/r/issues"})
+	if _, repo := cl.Target("github.com", "cwd/repo"); repo != "o/r" {
+		t.Fatalf("api Target repo = %s", repo)
+	}
+}

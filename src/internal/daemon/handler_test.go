@@ -481,3 +481,58 @@ func TestHandlerNoCachePassthroughIsNotStored(t *testing.T) {
 		t.Fatalf("passthrough stored: %v", h.cache.Keys())
 	}
 }
+
+func TestHandlerKeyScopeSharesAcrossCheckouts(t *testing.T) {
+	tests := []struct {
+		name   string
+		args   []string
+		a, b   execctx.ExecContext
+		shared bool
+	}{
+		{"run view across branches", []string{"run", "view", "7"},
+			execctx.ExecContext{Host: "github.com", Repo: "o/r", Branch: "main"},
+			execctx.ExecContext{Host: "github.com", Repo: "o/r", Branch: "feature"}, true},
+		{"pr view without selector stays per branch", []string{"pr", "view"},
+			execctx.ExecContext{Host: "github.com", Repo: "o/r", Branch: "main"},
+			execctx.ExecContext{Host: "github.com", Repo: "o/r", Branch: "feature"}, false},
+		{"api explicit repo across checkouts", []string{"api", "repos/o/r/actions/runs"},
+			execctx.ExecContext{Host: "github.com", Repo: "a/a", Branch: "x"},
+			execctx.ExecContext{Host: "github.com", Repo: "b/b", Branch: "y"}, true},
+		{"api placeholder stays per repo", []string{"api", "repos/{owner}/{repo}"},
+			execctx.ExecContext{Host: "github.com", Repo: "a/a"},
+			execctx.ExecContext{Host: "github.com", Repo: "b/b"}, false},
+		{"issue view stays per repo", []string{"issue", "view", "1"},
+			execctx.ExecContext{Host: "github.com", Repo: "a/a"},
+			execctx.ExecContext{Host: "github.com", Repo: "b/b"}, false},
+		{"token still isolates", []string{"api", "user"},
+			execctx.ExecContext{Host: "github.com", TokenHash: "one"},
+			execctx.ExecContext{Host: "github.com", TokenHash: "two"}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			h := newTestHandler()
+			h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+				return &executor.Result{Stdout: []byte("ok")}
+			}
+			h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: tt.args, Context: tt.a})
+			got := h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: tt.args, Context: tt.b})
+			if got.Cached != tt.shared {
+				t.Fatalf("cached = %v, want %v", got.Cached, tt.shared)
+			}
+		})
+	}
+}
+
+func TestHandlerExplicitRepoMutationInvalidatesTarget(t *testing.T) {
+	h := newTestHandler()
+	h.execute = func(context.Context, string, []string, string, authenv.Environment) *executor.Result {
+		return &executor.Result{Stdout: []byte("ok")}
+	}
+	cwd := execctx.ExecContext{Host: "github.com", Repo: "cwd/repo"}
+	read := &protocol.Request{Type: protocol.TypeExec, Args: []string{"api", "repos/o/r/pulls/1"}, Context: cwd}
+	h.Handle(read)
+	h.Handle(&protocol.Request{Type: protocol.TypeExec, Args: []string{"pr", "merge", "1", "-R", "o/r"}, Context: cwd})
+	if h.Handle(read).Cached {
+		t.Fatal("api read of o/r survived a pr merge targeting o/r")
+	}
+}
