@@ -59,6 +59,8 @@ Second call:  ghx pr list ...   → 0.1s (cache hit, instant)
 
 📖 **[Full documentation](specs/DOCS.md)** — install options, configuration, daemon & cache management, what gets cached, architecture, and more.
 
+🚀 **[Release process](RELEASE.md)** — how maintainers cut app and plugin releases.
+
 ## License
 
 [MIT](LICENSE)
