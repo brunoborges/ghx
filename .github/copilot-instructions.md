@@ -42,6 +42,7 @@ go test -v -race -coverprofile=coverage.out ./...
 | `executor` | Runs `gh` subprocesses and captures stdout/stderr/exit code |
 | `metrics` | Hit/miss counters, per-command stats, ring-buffer request log, TTL analysis |
 | `protocol` | Length-prefixed JSON IPC protocol (4-byte big-endian size header, 10MB max) |
+| `shape` | Normalizes `--jq`/`--json` output flags, applies jq filters, projects `--json` field subsets |
 
 ### IPC Protocol
 
@@ -49,7 +50,7 @@ Communication uses length-prefixed JSON over Unix sockets. `Request` carries `Ar
 
 ### Cache Key Design
 
-Keys are SHA-256 hashes of `host + repo + branch + tokenHash + args` joined with null separators. This ensures context-aware caching — the same command in different repos or branches gets different cache entries.
+Keys are SHA-256 hashes of `host + repo + branch + tokenHash + args` joined with null separators. The classifier scopes the context per command (`IgnoreBranch`, `IgnoreRepo`, `TargetRepo`), so the branch/repo is only included when the output depends on it. The `shape` package normalizes args before keying: `--jq` is stripped and re-applied in the daemon with gojq, and `--json` fields are sorted so subsets can be projected from cached supersets.
 
 ### Command Classification
 
@@ -63,7 +64,7 @@ The `Classifier` in `allowlist` determines handling:
 
 ### Namespace Invalidation
 
-Mutations flush all cache entries matching `host/repo/resourceType`. For example, `gh pr merge 42` invalidates all cached PR entries for that repository.
+Mutations flush all cache entries matching `host/repo/resourceType` plus the repo's `api` entries (an `api` write flushes the whole repo). For example, `gh pr merge 42` invalidates all cached PR and API entries for that repository.
 
 ## Key Conventions
 
@@ -72,7 +73,7 @@ Mutations flush all cache entries matching `host/repo/resourceType`. For example
 - **Cache/command keys**: Normalized with underscores (`pr_list`, `api_get`, `repo_view`)
 - **Resource types**: String constants like `"pr"`, `"issue"`, `"repo"` — used for both metrics grouping and cache invalidation namespaces
 - **Tests**: Table-driven, package-local, stdlib `testing` only (no testify). See `allowlist_test.go` for the canonical pattern.
-- **No external dependencies** beyond `gopkg.in/yaml.v3` — dashboard is embedded HTML, no frameworks
+- **Minimal dependencies**: `gopkg.in/yaml.v3` and `github.com/itchyny/gojq` (the jq engine gh itself uses). The dashboard is embedded HTML, no frameworks
 - **Config is forgiving**: Missing config files return safe defaults; callers log warnings, never panic
 
 ## Agent Plugin

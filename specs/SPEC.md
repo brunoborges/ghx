@@ -50,14 +50,17 @@ A cache key is a composite of the **full execution context**, not just command a
 
 ```
 CacheKey = hash(
-    gh_command,          // normalized: sorted flags, resolved args
+    gh_command,          // args without --jq, with --json fields sorted
     resolved_host,       // github.com or GHE hostname
-    resolved_repo,       // owner/name (from CWD or GH_REPO)
-    resolved_branch,     // current branch (when command depends on it)
+    resolved_repo,       // owner/name (from CWD or GH_REPO; -R or the API path when given; omitted for repo-independent commands)
+    resolved_branch,     // current branch (only when the output depends on it)
     auth_token_hash,     // SHA256 of token (not the token itself)
-    output_format,       // --json fields, --jq, --template, or default
 )
 ```
+
+**Output filters**: `--jq` is applied by the daemon (gojq, matching gh's formatting) to the cached unfiltered response, so different filters over the same data share one entry. A `--json` request for a subset of fields already cached for the same command is projected from that entry. Filter errors and non-zero exits rerun the original command directly.
+
+**Lifetimes**: commit-SHA-addressed API content uses `immutable_ttl` (1h); `run view <id>` and Actions run/job API responses reporting `"status":"completed"` use `settled_ttl` (10m).
 
 **Context resolution**: The client (`ghx`) resolves the execution context before sending to the daemon:
 - Repo: `git remote get-url origin` or `GH_REPO` env var
@@ -140,7 +143,7 @@ All three agents get the same response
 
 Resource types: `pr`, `issue`, `run`, `workflow`, `release`, `label`, `repo`, `api`.
 
-Example: After `gh pr merge #42`, all cached entries tagged `{github.com, owner/repo, pr}` are evicted.
+Example: After `gh pr merge #42`, all cached entries tagged `{github.com, owner/repo, pr}` are evicted, along with `{github.com, owner/repo, api}`. API writes evict every entry for the repo. Mutations target the repo named by `-R`/`--repo` or the API path when present.
 
 This is intentionally conservative — it may over-invalidate, but it will never serve stale data after mutations.
 
@@ -202,7 +205,7 @@ ghx ghcli upgrade            # Download the latest GitHub CLI to ~/.ghx/bin/gh
 ### Per-Command Overrides
 
 ```bash
-ghx --no-cache pr list            # Bypass cache for this call
+ghx --no-cache pr list            # Skip lookup; store the fresh result for others
 ghx --ttl 120 pr list             # Override TTL for this call
 GHX_TTL=120 ghx pr list           # Same, via env var
 GHX_NO_CACHE=1 ghx pr list        # Same as --no-cache, via env var
@@ -311,6 +314,10 @@ ttl_overrides:
   issue_list: 60s
   run_list: 15s
   api_get: 30s
+
+# Longer lifetimes for data that can't go stale
+immutable_ttl: 1h   # commit-SHA-addressed API content
+settled_ttl: 10m    # runs/jobs reporting status "completed"
 
 # Cache limits
 max_cache_entries: 1000

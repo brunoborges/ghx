@@ -251,20 +251,34 @@ After 30s:    ghx pr list ...   → 1.0s (TTL expired, fresh call)
 Each cached response is stored under a SHA-256 key computed from:
 
 - **Host** — the GitHub host (e.g., `github.com` or your GHES instance)
-- **Repository** — `owner/repo`
-- **Branch** — current Git branch
+- **Repository** — `owner/repo`, or the repository named by `-R`/`--repo` or an API path such as `repos/owner/repo/...`
+- **Branch** — current Git branch, only for commands whose output depends on it (e.g., `pr view` or `pr checks` without a PR number, `pr status`)
 - **Auth token hash** — SHA-256 fingerprint of your token (the token itself is never stored)
-- **Full command arguments** — every argument and flag, in order
+- **Command arguments** — every argument and flag, except output filters (see below)
 
-This means the **same command with different flags produces different cache entries**:
+Context the output cannot depend on is left out of the key, so `ghx run view 123`, `ghx pr view 42`, or `ghx api repos/o/r/pulls` run from different branches or checkouts share one entry. Commands that don't read the local repo at all (`search`, `gist`, `org list`, `repo list`, API paths without `{owner}`/`{repo}` placeholders) are shared across repositories.
+
+#### Output filters
+
+`--jq` and the order of `--json` fields don't change what gh fetches, so ghx caches the unfiltered response and applies the filter itself, using the same jq engine and output formatting as gh:
 
 ```bash
-ghx pr list --json number        # cache key A
-ghx pr list --json number,title  # cache key B (different flags)
-ghx pr list --json number        # cache hit on key A
+ghx pr view 42 --json title,state,number   # fetch, cache
+ghx pr view 42 --json number,state,title   # hit (same fields, different order)
+ghx pr view 42 --json state --jq .state    # hit (subset of cached fields, filtered)
+ghx api repos/o/r --jq .default_branch     # fetch, cache the full response
+ghx api repos/o/r --jq .stargazers_count   # hit
+ghx pr view 42 --json url                  # miss (field not cached yet)
 ```
 
-And the same command in **different repos or branches** also gets separate entries — no cross-context collisions.
+If a filter fails, or the command exits non-zero, ghx runs the original command directly so you see gh's exact output. `--template`, `api --paginate`, `api --include`, and filters that read `env`/`$ENV` are cached by their exact arguments instead.
+
+#### Longer-lived data
+
+Some responses can't go stale, so they are kept longer than the regular TTL (unless a `--ttl` or `ttl_overrides` entry applies):
+
+- **Commit-addressed content** — `api repos/o/r/commits/<sha>`, `git/commits|trees|blobs/<sha>`: `immutable_ttl` (default 1h)
+- **Completed runs and jobs** — `run view <id>` and `api repos/o/r/actions/runs|jobs/<id>` once they report `"status":"completed"`: `settled_ttl` (default 10m)
 
 #### Singleflight coalescing
 
@@ -281,11 +295,13 @@ This happens automatically — no configuration needed. The coalesced count is v
 ### Per-command options
 
 ```bash
-ghx --no-cache pr list ...     # Bypass cache for this call
+ghx --no-cache pr list ...     # Fetch fresh data, refreshing the shared cache entry
 ghx --ttl 120 pr list ...      # Override TTL to 120 seconds
 GHX_NO_CACHE=1 ghx pr list ... # Same via env var
 GHX_TTL=60 ghx pr list ...     # Same via env var
 ```
+
+`--no-cache` skips the lookup but stores the fresh result, so other callers polling the same command benefit from it.
 
 Environment overrides work without a config file and take precedence over YAML values.
 
@@ -380,9 +396,12 @@ Only explicitly allowlisted read-only commands are cached:
 | `gh org list` | ✅ |
 | `gh pr create/merge/close/edit` | ❌ (mutation → invalidates PR cache) |
 | `gh issue create/edit/delete/close` | ❌ (mutation → invalidates issue cache) |
+| `gh workflow run`, `gh run rerun/cancel` | ❌ (mutation → invalidates run cache) |
+| `gh repo sync/rename/archive/fork`, `gh project item-*`, `gh label clone` | ❌ (mutation) |
+| `gh run watch/download` | ❌ (always passthrough) |
 | `gh auth/config/codespace/secret` | ❌ (always passthrough) |
 
-Mutations run in the invoking client, preserving stdin, stdout, stderr, and terminal prompts. After the command exits, ghx invalidates related cache entries, including when `--no-cache` is used or the command fails after a partial write. For example, `ghx pr merge 42` flushes all cached PR entries for that repo. A mutation never starts a daemon solely to invalidate an empty cache. Older daemons safely flush the whole cache when receiving the scoped invalidation request.
+Mutations run in the invoking client, preserving stdin, stdout, stderr, and terminal prompts. After the command exits, ghx invalidates related cache entries, including when `--no-cache` is used or the command fails after a partial write. For example, `ghx pr merge 42` flushes all cached PR entries and cached `gh api` responses for that repo; an `api` write flushes the whole repo. Mutations with `-R owner/repo` invalidate that repository rather than the current checkout. A mutation never starts a daemon solely to invalidate an empty cache. Older daemons safely flush the whole cache when receiving the scoped invalidation request.
 
 API requests are cached only when their effective method is GET. Fields imply POST unless the method is explicitly GET; GraphQL, input bodies, file-backed fields, and unknown options bypass caching. These requests are never coalesced. An invalidation failure prints a warning and preserves the mutation's exit code; the mutation is never retried.
 
@@ -482,6 +501,12 @@ ttl_overrides:
   pr_view: 30s
   issue_list: 60s
   run_list: 15s
+
+# TTL for commit-SHA-addressed API content (default: 1h)
+immutable_ttl: 1h
+
+# TTL for runs/jobs that report status "completed" (default: 10m)
+settled_ttl: 10m
 
 # Max cached entries before LRU eviction (default: 1000)
 max_cache_entries: 1000
