@@ -287,7 +287,7 @@ A single self-contained HTML page (embedded in the Go binary via `embed`) with n
 
 **Dashboard sections:**
 
-1. **Overview** — real-time hit rate %, total requests, cache size, daemon uptime
+1. **Overview** — real-time hit rate %, total requests, cache size, daemon uptime, and daemon version (shown next to the title)
 2. **Per-Command Breakdown** — sortable table showing each command with hit count, miss count, hit rate, and average latency
 3. **Request Log** — scrollable live tail of recent requests (last 200) showing timestamp, command, cache hit/miss, and latency. With `log_args: true`, also shows the full redacted arguments and the normalized fetch command
 4. **TTL Analysis** — for each command, shows the median time between repeated identical requests, helping users pick the right TTL

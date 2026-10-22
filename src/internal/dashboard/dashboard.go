@@ -35,6 +35,7 @@ const dashboardHTML = `<!DOCTYPE html>
   }
   h1 { font-size: 24px; margin-bottom: 4px; }
   h1 span { color: var(--accent); }
+  h1 .version-badge { font-size: 12px; font-weight: 500; color: var(--text-dim); border: 1px solid var(--border); border-radius: 10px; padding: 2px 8px; margin-left: 8px; vertical-align: middle; }
   .subtitle { color: var(--text-dim); font-size: 14px; margin-bottom: 24px; }
   .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 24px; }
   .card {
@@ -98,7 +99,7 @@ const dashboardHTML = `<!DOCTYPE html>
 </style>
 </head>
 <body>
-<h1><span>ghx</span> Dashboard</h1>
+<h1><span>ghx</span> Dashboard <span class="version-badge" id="versionBadge" title="ghxd version">-</span></h1>
 <p class="subtitle">GitHub CLI Cache Proxy — <span id="uptime">-</span></p>
 
 <div class="actions">
@@ -171,7 +172,10 @@ async function refresh() {
 
 function renderStats(s) {
   $('#uptime').textContent = 'Uptime: ' + s.uptime;
-  if (s.version) $('#version').textContent = s.version;
+  if (s.version) {
+    $('#version').textContent = s.version;
+    $('#versionBadge').textContent = s.version;
+  }
   $('#total').textContent = fmtNum(s.total);
   $('#hits').textContent = fmtNum(s.hits);
   $('#misses').textContent = fmtNum(s.misses);
