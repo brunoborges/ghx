@@ -67,6 +67,14 @@ func TestMutations(t *testing.T) {
 		{[]string{"secret", "delete", "MY_SECRET"}, Mutation},
 		{[]string{"variable", "set", "MY_VAR"}, Mutation},
 		{[]string{"variable", "delete", "MY_VAR"}, Mutation},
+		{[]string{"run", "cancel", "123"}, Mutation},
+		{[]string{"run", "rerun", "123", "--failed"}, Mutation},
+		{[]string{"workflow", "run", "ci.yml"}, Mutation},
+		{[]string{"workflow", "enable", "ci.yml"}, Mutation},
+		{[]string{"release", "upload", "v1", "a.tgz"}, Mutation},
+		{[]string{"repo", "sync"}, Mutation},
+		{[]string{"pr", "update-branch", "1"}, Mutation},
+		{[]string{"project", "item-add", "1"}, Mutation},
 	}
 
 	for _, tt := range tests {
@@ -172,5 +180,32 @@ func TestAPIEffectiveMethod(t *testing.T) {
 				t.Fatalf("Classify(%q) = %+v, want %v", tt.args, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestMutationResourceRouting(t *testing.T) {
+	c := NewClassifier(nil)
+	tests := []struct {
+		args []string
+		want ResourceType
+	}{
+		{[]string{"workflow", "run", "ci.yml"}, ResourceRun},
+		{[]string{"run", "cancel", "1"}, ResourceRun},
+		{[]string{"workflow", "disable", "ci.yml"}, ResourceWorkflow},
+		{[]string{"label", "clone", "o/r"}, ResourceLabel},
+	}
+	for _, tt := range tests {
+		if got := c.Classify(tt.args); got.Type != Mutation || got.Resource != tt.want {
+			t.Errorf("Classify(%v) = %+v, want Mutation/%s", tt.args, got, tt.want)
+		}
+	}
+}
+
+func TestReadOnlyRunCommandsStayPassthrough(t *testing.T) {
+	c := NewClassifier(nil)
+	for _, args := range [][]string{{"run", "watch", "1"}, {"run", "download", "1"}, {"repo", "clone", "o/r"}, {"pr", "checkout", "1"}} {
+		if got := c.Classify(args); got.Type != Passthrough {
+			t.Errorf("Classify(%v) = %+v, want Passthrough", args, got)
+		}
 	}
 }

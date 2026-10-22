@@ -409,3 +409,40 @@ func TestHandlerScopedFlush(t *testing.T) {
 		t.Fatal("legacy/global flush did not clear cache")
 	}
 }
+
+func TestHandlerInvalidationCrossesAPINamespace(t *testing.T) {
+	ctx := execctx.ExecContext{Host: "github.com", Repo: "owner/repo"}
+	seed := func(h *Handler) {
+		for _, entry := range []cache.Entry{
+			{Key: "run", Host: ctx.Host, Repo: ctx.Repo, Resource: allowlist.ResourceRun},
+			{Key: "api", Host: ctx.Host, Repo: ctx.Repo, Resource: allowlist.ResourceAPI},
+			{Key: "pr", Host: ctx.Host, Repo: ctx.Repo, Resource: allowlist.ResourcePR},
+			{Key: "other repo api", Host: ctx.Host, Repo: "owner/other", Resource: allowlist.ResourceAPI},
+		} {
+			entry.TTL, entry.CachedAt = time.Minute, time.Now()
+			h.cache.Set(&entry)
+		}
+	}
+	tests := []struct {
+		resource allowlist.ResourceType
+		left     []string
+	}{
+		{allowlist.ResourceRun, []string{"pr", "other repo api"}},
+		{allowlist.ResourceAPI, []string{"other repo api"}},
+	}
+	for _, tt := range tests {
+		t.Run(string(tt.resource), func(t *testing.T) {
+			h := newTestHandler()
+			seed(h)
+			h.Handle(&protocol.Request{Type: protocol.TypeFlush, Resource: tt.resource, Context: ctx})
+			for _, k := range tt.left {
+				if h.cache.Get(k) == nil {
+					t.Errorf("%q was invalidated", k)
+				}
+			}
+			if h.cache.Size() != len(tt.left) {
+				t.Errorf("remaining keys = %v, want %v", h.cache.Keys(), tt.left)
+			}
+		})
+	}
+}

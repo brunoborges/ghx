@@ -126,8 +126,7 @@ func (h *Handler) handleExec(req *protocol.Request) *protocol.Response {
 		h.stats.Record(cmdKey, "", metrics.ResultPassthrough, latency)
 
 		if classification.Resource != allowlist.ResourceUnknown {
-			count := h.cache.InvalidateNamespace(req.Context.Host, req.Context.Repo, classification.Resource)
-			h.stats.RecordInvalidation(count)
+			h.stats.RecordInvalidation(h.invalidate(req.Context.Host, req.Context.Repo, classification.Resource))
 		}
 
 		return &protocol.Response{
@@ -243,11 +242,22 @@ func (h *Handler) handleFlush(req *protocol.Request) *protocol.Response {
 	if req.Resource == allowlist.ResourceUnknown {
 		count = h.cache.Flush()
 	} else {
-		count = h.cache.InvalidateNamespace(req.Context.Host, req.Context.Repo, req.Resource)
+		count = h.invalidate(req.Context.Host, req.Context.Repo, req.Resource)
 		h.stats.RecordInvalidation(count)
 	}
 	msg := []byte(fmt.Sprintf("flushed %d entries\n", count))
 	return &protocol.Response{Stdout: msg}
+}
+
+// invalidate drops entries affected by a mutation on resource. Raw API reads can
+// observe any resource, so they are flushed alongside it; a raw API write can
+// change any resource, so it flushes everything cached for the repository.
+func (h *Handler) invalidate(host, repo string, resource allowlist.ResourceType) int {
+	if resource == allowlist.ResourceAPI {
+		return h.cache.InvalidateRepo(host, repo)
+	}
+	return h.cache.InvalidateNamespace(host, repo, resource) +
+		h.cache.InvalidateNamespace(host, repo, allowlist.ResourceAPI)
 }
 
 func (h *Handler) handleKeys() *protocol.Response {

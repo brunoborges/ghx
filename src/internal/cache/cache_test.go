@@ -372,3 +372,18 @@ func TestByteBudgetConcurrentEviction(t *testing.T) {
 		})
 	}
 }
+
+func TestInvalidateRepo(t *testing.T) {
+	c := New(10)
+	for _, e := range []*Entry{
+		{Key: "a", Host: "h", Repo: "o/r", Resource: allowlist.ResourcePR},
+		{Key: "b", Host: "h", Repo: "o/r", Resource: allowlist.ResourceAPI},
+		{Key: "c", Host: "h", Repo: "o/x", Resource: allowlist.ResourcePR},
+	} {
+		e.TTL, e.CachedAt = time.Minute, time.Now()
+		c.Set(e)
+	}
+	if n := c.InvalidateRepo("h", "o/r"); n != 2 || c.Get("c") == nil || c.Size() != 1 {
+		t.Fatalf("InvalidateRepo removed %d, keys=%v", n, c.Keys())
+	}
+}

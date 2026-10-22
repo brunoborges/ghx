@@ -99,6 +99,39 @@ var mutatingActions = map[string]bool{
 	"unpin":    true,
 	"transfer": true,
 	"set":      true,
+	// Workflow/run state changes.
+	"run":     true, // gh workflow run
+	"rerun":   true,
+	"cancel":  true,
+	"enable":  true,
+	"disable": true,
+	// Other remote writes.
+	"upload":        true,
+	"sync":          true,
+	"rename":        true,
+	"archive":       true,
+	"unarchive":     true,
+	"fork":          true,
+	"update-branch": true,
+	"develop":       true,
+	"item-add":      true,
+	"item-edit":     true,
+	"item-delete":   true,
+	"item-archive":  true,
+	"item-create":   true,
+	"field-create":  true,
+	"field-delete":  true,
+	"link":          true,
+	"unlink":        true,
+	"copy":          true,
+	"mark-template": true,
+}
+
+// mutationResourceOverrides route invalidation for mutations whose effect
+// lands in a different namespace than their subcommand.
+var mutationResourceOverrides = map[string]ResourceType{
+	"workflow run": ResourceRun,
+	"label clone":  ResourceLabel,
 }
 
 var subcommandResourceMap = map[string]ResourceType{
@@ -202,6 +235,9 @@ func (c *Classifier) Classify(args []string) Classification {
 	}
 
 	// Check if it's a known mutation
+	if res, ok := mutationResourceOverrides[key]; ok {
+		return Classification{Type: Mutation, Resource: res, CmdKey: strings.ReplaceAll(key, " ", "_")}
+	}
 	if mutatingActions[action] {
 		return Classification{
 			Type:     Mutation,

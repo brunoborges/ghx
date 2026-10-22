@@ -155,6 +155,24 @@ func (c *Cache) InvalidateNamespace(host, repo string, resource allowlist.Resour
 	return len(toRemove)
 }
 
+// InvalidateRepo removes all entries for the given host and repo, regardless of resource type.
+func (c *Cache) InvalidateRepo(host, repo string) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	var toRemove []*list.Element
+	for elem := c.order.Front(); elem != nil; elem = elem.Next() {
+		entry := elem.Value.(*storedEntry).entry
+		if entry.Host == host && entry.Repo == repo {
+			toRemove = append(toRemove, elem)
+		}
+	}
+	for _, elem := range toRemove {
+		c.removeElement(elem)
+	}
+	return len(toRemove)
+}
+
 // Flush removes all entries from the cache.
 func (c *Cache) Flush() int {
 	c.mu.Lock()
