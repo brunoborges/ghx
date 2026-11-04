@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/brunoborges/ghx/src/internal/ipc"
@@ -57,8 +58,7 @@ func (c *Client) Send(req *protocol.Request) (*protocol.Response, error) {
 	}
 	defer func() {
 		if err := conn.Close(); err != nil {
-			// A completed request cannot be retried just because cleanup failed.
-			// The close error is secondary to the request result.
+			log.Printf("close daemon connection: %v", err)
 		}
 	}()
 

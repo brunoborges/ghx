@@ -2,6 +2,8 @@ package ghcli
 
 import (
 	"bytes"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -48,14 +50,13 @@ func IsShim(ghPath string, ghxPath string) bool {
 	if err != nil {
 		return false
 	}
-	defer f.Close()
-
-	header := make([]byte, 512)
-	n, err := f.Read(header)
-	if err != nil || n == 0 {
+	header, readErr := io.ReadAll(io.LimitReader(f, 512))
+	if err := f.Close(); err != nil {
+		log.Printf("close gh executable: %v", err)
+	}
+	if readErr != nil || len(header) == 0 {
 		return false
 	}
-	header = header[:n]
 
 	// Compiled binaries (the real gh) won't contain our text marker
 	if !isTextHeader(header) {

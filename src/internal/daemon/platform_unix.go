@@ -27,8 +27,10 @@ func removeStaleSocket(path string) error {
 	}
 	conn, err := net.DialTimeout("unix", path, 200*time.Millisecond)
 	if err == nil {
-		conn.Close()
-		return fmt.Errorf("daemon already listening at %s (stop with: ghx xdaemon stop)", path)
+		return errors.Join(
+			fmt.Errorf("daemon already listening at %s (stop with: ghx xdaemon stop)", path),
+			conn.Close(),
+		)
 	}
 	if !errors.Is(err, syscall.ECONNREFUSED) && !errors.Is(err, os.ErrNotExist) {
 		return fmt.Errorf("cannot determine socket ownership: %w", err)
@@ -58,8 +60,11 @@ func acquireInstanceLock(socketPath string) (*os.File, error) {
 		return nil, err
 	}
 	if err := syscall.Flock(int(f.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
-		f.Close()
-		return nil, fmt.Errorf("cannot claim daemon socket %s (stop with: ghx xdaemon stop): %w", socketPath, err)
+		closeErr := f.Close()
+		return nil, errors.Join(
+			fmt.Errorf("cannot claim daemon socket %s (stop with: ghx xdaemon stop): %w", socketPath, err),
+			closeErr,
+		)
 	}
 	return f, nil
 }

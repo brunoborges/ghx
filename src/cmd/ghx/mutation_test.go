@@ -124,7 +124,11 @@ func TestMainMutationUsesNativeStdinAndFlush(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer os.RemoveAll(dir)
+			defer func() {
+				if err := os.RemoveAll(dir); err != nil {
+					t.Error(err)
+				}
+			}()
 			address := filepath.Join(dir, "s")
 			if runtime.GOOS == "windows" {
 				address = fmt.Sprintf(`\\.\pipe\ghx-main-%d-%d`, os.Getpid(), time.Now().UnixNano())
@@ -135,13 +139,21 @@ func TestMainMutationUsesNativeStdinAndFlush(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				defer ln.Close()
+				defer func() {
+					if err := ln.Close(); err != nil {
+						t.Error(err)
+					}
+				}()
 				go func() {
 					conn, err := ln.Accept()
 					if err != nil {
 						return
 					}
-					defer conn.Close()
+					defer func() {
+						if err := conn.Close(); err != nil {
+							t.Error(err)
+						}
+					}()
 					var req protocol.Request
 					if protocol.ReadMessage(conn, &req) != nil {
 						return
