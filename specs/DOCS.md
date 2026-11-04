@@ -9,6 +9,7 @@
   - [Homebrew (macOS)](#homebrew-macos--recommended)
   - [Quick install script (macOS / Linux)](#quick-install-script-macos--linux)
   - [PowerShell (Windows)](#powershell-windows)
+    - [Microsoft Defender blocks `ghx.exe`](#microsoft-defender-blocks-ghxexe)
   - [Manual download](#manual-download)
   - [Build from source](#build-from-source)
   - [Agents Plugin](#agents-plugin-claude-code--copilot-cli)
@@ -62,6 +63,24 @@ irm https://raw.githubusercontent.com/brunoborges/ghx/main/install.ps1 | iex
 ```
 
 This installs `ghx.exe` and `ghxd.exe` to `%LOCALAPPDATA%\ghx\bin` and adds it to your user PATH. If no real `gh.exe` is found, a `gh.cmd` shim is also installed.
+
+#### Microsoft Defender blocks `ghx.exe`
+
+The Windows release binaries are not Authenticode-signed yet. On machines that enforce the Defender attack surface reduction (ASR) rule **Use advanced protection against ransomware** (`c1db55ab-c21a-4637-bb3f-a12568109d35`), an unsigned executable without established reputation can be blocked at launch, so even `ghx.exe xversion` fails with `Access is denied`. Releases after v1.7.1 embed version information in the Windows executables and keep their symbol tables to reduce heuristic false positives, but reputation is assigned by Microsoft and may still be missing for a new release.
+
+To resolve it without turning off Defender protections:
+
+1. **Verify the download.** Compare the archive hash with the release's `checksums.txt`:
+   ```powershell
+   Get-FileHash ghx-windows-amd64.zip -Algorithm SHA256
+   ```
+2. **Confirm the ASR rule caused the block.** Look for Event ID 1121 that names `ghx.exe` and rule `c1db55ab-c21a-4637-bb3f-a12568109d35`:
+   ```powershell
+   Get-WinEvent -LogName 'Microsoft-Windows-Windows Defender/Operational' -FilterXPath '*[System[EventID=1121]]' -MaxEvents 10 |
+     Format-List TimeCreated, Message
+   ```
+3. **Report the false positive.** Submit the blocked `ghx.exe` (and `ghxd.exe`) at the [Microsoft Security Intelligence file submission portal](https://www.microsoft.com/wdsi/filesubmission), and [open an issue](https://github.com/brunoborges/ghx/issues) with the release version and file hash so the maintainers can follow up.
+4. **Ask your administrator for a scoped exclusion if you need ghx right away.** In managed environments, an administrator can add an [ASR rule exclusion](https://learn.microsoft.com/defender-endpoint/attack-surface-reduction-rules-configure) for the exact install path (for example `C:\Users\<user>\AppData\Local\ghx\bin\ghx.exe` and `ghxd.exe`). This exempts only those files from ASR rules; real-time protection and other Defender scans still apply. Don't disable the rule or Defender itself.
 
 ### Manual download
 

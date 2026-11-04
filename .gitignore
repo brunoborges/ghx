@@ -15,3 +15,6 @@ bin/
 
 # Release archives
 dist/
+
+# Generated Windows resources (release builds)
+*.syso

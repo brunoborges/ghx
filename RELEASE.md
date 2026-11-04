@@ -48,6 +48,7 @@ Then follow it with `gh run watch`.
    - the Ubuntu/macOS/Windows × Go `stable`/`oldstable` matrix.
 3. **release**: runs only if `ci` succeeds.
    - Cross-compiles darwin/linux/windows × amd64/arm64 archives with the version stamped in through `-ldflags "-X main.version=…"`.
+   - For Windows, generates `VERSIONINFO` and an application manifest with [`go-winres`](https://github.com/tc-hib/go-winres) and keeps symbol tables (no `-s -w`). Unsigned, stripped Go binaries without metadata often trigger Defender heuristics such as the ransomware ASR rule ([#33](https://github.com/brunoborges/ghx/issues/33)). The binaries aren't Authenticode-signed yet. Signing them, for example with Azure Trusted Signing, is the long-term fix.
    - Computes `checksums.txt`.
    - Creates and pushes the tag. This happens only on manual runs, after the build succeeds.
    - Publishes the GitHub release with auto-generated notes.
