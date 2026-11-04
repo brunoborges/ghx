@@ -5,6 +5,7 @@ package main
 import (
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"os/exec"
 	"syscall"
@@ -23,7 +24,11 @@ func daemonOwnsSocket(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer lock.Close()
+	defer func() {
+		if err := lock.Close(); err != nil {
+			log.Printf("close daemon lock: %v", err)
+		}
+	}()
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		if errors.Is(err, syscall.EWOULDBLOCK) {
 			return true, nil
@@ -41,10 +46,16 @@ func execDirect(ghPath string, args []string) {
 		os.Exit(1)
 	}
 	allArgs := append([]string{ghPath}, args...)
-	syscall.Exec(path, allArgs, os.Environ())
+	if err := syscall.Exec(path, allArgs, os.Environ()); err != nil {
+		fmt.Fprintf(os.Stderr, "ghx: execute %s: %v\n", path, err)
+		os.Exit(1)
+	}
 }
 
 // execReplace replaces the current process with the given binary.
 func execReplace(path string, argv []string, env []string) {
-	syscall.Exec(path, argv, env)
+	if err := syscall.Exec(path, argv, env); err != nil {
+		fmt.Fprintf(os.Stderr, "ghx: execute %s: %v\n", path, err)
+		os.Exit(1)
+	}
 }
