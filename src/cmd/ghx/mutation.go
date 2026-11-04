@@ -19,7 +19,7 @@ func runMutation(cmd *exec.Cmd, flush *protocol.Request, send func(*protocol.Req
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM, syscall.SIGHUP)
 	defer signal.Stop(signals)
 	if err := cmd.Start(); err != nil {
-		_, _ = fmt.Fprintf(cmd.Stderr, "ghx: %v\n", err)
+		fmt.Fprintf(cmd.Stderr, "ghx: %v\n", err)
 		return 1
 	}
 
@@ -47,7 +47,7 @@ wait:
 				exitCode = 128 + int(status.Signal())
 			}
 		} else {
-			_, _ = fmt.Fprintf(cmd.Stderr, "ghx: %v\n", runErr)
+			fmt.Fprintf(cmd.Stderr, "ghx: %v\n", runErr)
 		}
 	}
 
@@ -59,7 +59,7 @@ wait:
 		err = fmt.Errorf("daemon rejected invalidation: %s (exit %d)", resp.Error, resp.ExitCode)
 	}
 	if err != nil {
-		_, _ = fmt.Fprintf(cmd.Stderr, "ghx: warning: cache invalidation failed: %v; run 'ghx xcache flush' before cached reads\n", err)
+		fmt.Fprintf(cmd.Stderr, "ghx: warning: cache invalidation failed: %v; run 'ghx xcache flush' before cached reads\n", err)
 	}
 	return exitCode
 }

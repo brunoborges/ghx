@@ -43,14 +43,8 @@ func TestFindRealGHInPath_SkipsShim(t *testing.T) {
 
 	// Set PATH to only include the shim directory
 	orig := os.Getenv("PATH")
-	t.Cleanup(func() {
-		if err := os.Setenv("PATH", orig); err != nil {
-			t.Errorf("restoring PATH: %v", err)
-		}
-	})
-	if err := os.Setenv("PATH", dir); err != nil {
-		t.Fatal(err)
-	}
+	t.Cleanup(func() { os.Setenv("PATH", orig) })
+	os.Setenv("PATH", dir)
 
 	got := FindRealGHInPath()
 	if got != "" {
@@ -68,14 +62,8 @@ func TestFindRealGHInPath_FindsReal(t *testing.T) {
 	}
 
 	orig := os.Getenv("PATH")
-	t.Cleanup(func() {
-		if err := os.Setenv("PATH", orig); err != nil {
-			t.Errorf("restoring PATH: %v", err)
-		}
-	})
-	if err := os.Setenv("PATH", dir); err != nil {
-		t.Fatal(err)
-	}
+	t.Cleanup(func() { os.Setenv("PATH", orig) })
+	os.Setenv("PATH", dir)
 
 	got := FindRealGHInPath()
 	if got != ghPath {
@@ -149,9 +137,7 @@ func TestIsExecutable(t *testing.T) {
 
 	// Directory
 	subDir := filepath.Join(dir, "subdir")
-	if err := os.Mkdir(subDir, 0755); err != nil {
-		t.Fatal(err)
-	}
+	os.Mkdir(subDir, 0755)
 	if isExecutable(subDir) {
 		t.Error("expected directory to NOT be executable")
 	}
@@ -197,9 +183,7 @@ func TestCheckStaleness_OldFile(t *testing.T) {
 		t.Fatal(err)
 	}
 	oldTime := time.Now().Add(-45 * 24 * time.Hour)
-	if err := os.Chtimes(ghPath, oldTime, oldTime); err != nil {
-		t.Fatal(err)
-	}
+	os.Chtimes(ghPath, oldTime, oldTime)
 
 	// This only warns for managed paths, so it won't print for arbitrary paths.
 	// Just verify it doesn't panic.
