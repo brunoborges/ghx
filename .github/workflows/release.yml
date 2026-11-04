@@ -129,13 +129,32 @@ jobs:
             mkdir "${output}"
 
             EXE_SUFFIX=""
+            BUILD_LDFLAGS="${LDFLAGS}"
             if [ "${GOOS}" = "windows" ]; then
               EXE_SUFFIX=".exe"
+              # Unsigned, stripped Go binaries without version metadata are a
+              # common false-positive pattern for Defender heuristics (e.g. the
+              # ransomware ASR rule), so keep symbols and embed VERSIONINFO plus
+              # an application manifest in the Windows executables.
+              BUILD_LDFLAGS="-X main.version=${VERSION}"
+              for bin in ghx ghxd; do
+                go run github.com/tc-hib/go-winres@v0.3.3 simply \
+                  --arch "${GOARCH}" \
+                  --out "src/cmd/${bin}/rsrc" \
+                  --manifest cli \
+                  --product-name "ghx" \
+                  --file-description "ghx - GitHub CLI cache proxy (${bin})" \
+                  --product-version "${VERSION#v}" \
+                  --file-version "${VERSION#v}" \
+                  --original-filename "${bin}.exe" \
+                  --copyright "Copyright (c) Bruno Borges. MIT License."
+              done
             fi
 
             echo "Building ${GOOS}/${GOARCH}..."
-            CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build -trimpath -buildvcs=true -ldflags "${LDFLAGS}" -o "${output}/ghx${EXE_SUFFIX}" ./src/cmd/ghx
-            CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build -trimpath -buildvcs=true -ldflags "${LDFLAGS}" -o "${output}/ghxd${EXE_SUFFIX}" ./src/cmd/ghxd
+            CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build -trimpath -buildvcs=true -ldflags "${BUILD_LDFLAGS}" -o "${output}/ghx${EXE_SUFFIX}" ./src/cmd/ghx
+            CGO_ENABLED=0 GOOS=${GOOS} GOARCH=${GOARCH} go build -trimpath -buildvcs=true -ldflags "${BUILD_LDFLAGS}" -o "${output}/ghxd${EXE_SUFFIX}" ./src/cmd/ghxd
+            rm -f src/cmd/ghx/*.syso src/cmd/ghxd/*.syso
             cp LICENSE dist/source.json "${output}/"
 
             if [ "${GOOS}" = "windows" ]; then
