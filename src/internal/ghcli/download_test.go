@@ -216,7 +216,9 @@ func TestAtomicInstall(t *testing.T) {
 
 func TestGetLatestVersion_MockServer(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		json.NewEncoder(w).Encode(ghRelease{TagName: "v2.45.0"})
+		if err := json.NewEncoder(w).Encode(ghRelease{TagName: "v2.45.0"}); err != nil {
+			t.Errorf("encoding release: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -252,7 +254,9 @@ func TestGetLatestVersion_ServerError(t *testing.T) {
 func TestDownloadChecksums_MockServer(t *testing.T) {
 	checksumContent := "abc123  gh_2.45.0_linux_amd64.tar.gz\ndef456  gh_2.45.0_macOS_arm64.zip\n"
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Write([]byte(checksumContent))
+		if _, err := w.Write([]byte(checksumContent)); err != nil {
+			t.Errorf("writing checksums: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -288,13 +292,13 @@ func createTestTarGz(t *testing.T, archivePath, entryName string, content []byte
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	gw := gzip.NewWriter(f)
-	defer gw.Close()
+	defer func() { _ = gw.Close() }()
 
 	tw := tar.NewWriter(gw)
-	defer tw.Close()
+	defer func() { _ = tw.Close() }()
 
 	hdr := &tar.Header{
 		Name: entryName,
@@ -315,10 +319,10 @@ func createTestZip(t *testing.T, archivePath, entryName string, content []byte) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	zw := zip.NewWriter(f)
-	defer zw.Close()
+	defer func() { _ = zw.Close() }()
 
 	w, err := zw.Create(entryName)
 	if err != nil {

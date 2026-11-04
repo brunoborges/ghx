@@ -58,14 +58,16 @@ func TestDaemonLifecycleProcess(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer ln.Close()
+		defer func() { _ = ln.Close() }()
 		for {
 			conn, err := ln.Accept()
 			if err != nil {
 				t.Fatal(err)
 			}
-			io.Copy(io.Discard, conn)
-			conn.Close()
+			if _, err := io.Copy(io.Discard, conn); err != nil {
+				t.Error(err)
+			}
+			_ = conn.Close()
 		}
 	case "delayed ready":
 		time.Sleep(200 * time.Millisecond)
@@ -107,14 +109,16 @@ func TestWaitForDaemonStopRetainsOwnership(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer lock.Close()
+	defer func() { _ = lock.Close() }()
 	if err := syscall.Flock(int(lock.Fd()), syscall.LOCK_EX|syscall.LOCK_NB); err != nil {
 		t.Fatal(err)
 	}
 	if err := waitForDaemonStop(cfg.SocketPath, 100*time.Millisecond); err == nil {
 		t.Fatal("reported shutdown while the lock was held without a listener")
 	}
-	lock.Close()
+	if err := lock.Close(); err != nil {
+		t.Fatal(err)
+	}
 	if err := waitForDaemonStop(cfg.SocketPath, time.Second); err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +173,7 @@ func TestStartDaemonConfirmsReadiness(t *testing.T) {
 				t.Cleanup(func() {
 					if _, err := client.New(cfg.SocketPath).Send(&protocol.Request{Type: protocol.TypeShutdown}); err != nil {
 						t.Error(err)
-						cmd.Process.Kill()
+						_ = cmd.Process.Kill()
 					}
 					if err := waitForDaemonStop(cfg.SocketPath, 5*time.Second); err != nil {
 						t.Error(err)
@@ -183,7 +187,7 @@ func TestStartDaemonConfirmsReadiness(t *testing.T) {
 				}
 			} else {
 				if err == nil {
-					cmd.Process.Kill()
+					_ = cmd.Process.Kill()
 					t.Fatal("start reported success without a responsive daemon")
 				}
 				if strings.HasPrefix(mode, "exit") && !strings.Contains(err.Error(), "exited before becoming ready") {

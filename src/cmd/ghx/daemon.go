@@ -29,7 +29,7 @@ func restartDaemon(cfg *config.Config) error {
 		if resp.Error != "" || resp.ExitCode != 0 {
 			return fmt.Errorf("stop daemon: exit code %d: %s", resp.ExitCode, resp.Error)
 		}
-		os.Stdout.Write(resp.Stdout)
+		_, _ = os.Stdout.Write(resp.Stdout)
 	}
 	if err := waitForDaemonStop(cfg.SocketPath, daemonStopTimeout); err != nil {
 		return err

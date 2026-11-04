@@ -63,7 +63,7 @@ func TestSend_RequestSentReadFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("net.Listen: %v", err)
 	}
-	defer ln.Close()
+	defer func() { _ = ln.Close() }()
 
 	serverDone := make(chan struct{})
 	go func() {
@@ -72,7 +72,7 @@ func TestSend_RequestSentReadFails(t *testing.T) {
 		if err != nil {
 			return
 		}
-		defer conn.Close()
+		defer func() { _ = conn.Close() }()
 		// Read (and discard) the request so the client's write deadline is satisfied.
 		var req protocol.Request
 		_ = protocol.ReadMessage(conn, &req)
@@ -91,7 +91,7 @@ func TestSend_RequestSentReadFails(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dial: %v", err)
 	}
-	defer conn.Close()
+	defer func() { _ = conn.Close() }()
 
 	req := &protocol.Request{Type: protocol.TypeStats}
 	if err := protocol.WriteMessage(conn, req); err != nil {
@@ -121,7 +121,7 @@ func TestSendControlDeadlineDoesNotLimitExecution(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer os.RemoveAll(dir)
+			defer func() { _ = os.RemoveAll(dir) }()
 			address := filepath.Join(dir, "s")
 			if runtime.GOOS == "windows" {
 				address = fmt.Sprintf(`\\.\pipe\ghx-test-%d-%d`, os.Getpid(), time.Now().UnixNano())
@@ -130,7 +130,7 @@ func TestSendControlDeadlineDoesNotLimitExecution(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer ln.Close()
+			defer func() { _ = ln.Close() }()
 			done := make(chan struct{})
 			go func() {
 				defer close(done)

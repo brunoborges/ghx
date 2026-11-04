@@ -115,10 +115,10 @@ func main() {
 	}
 
 	if len(resp.Stdout) > 0 {
-		os.Stdout.Write(resp.Stdout)
+		_, _ = os.Stdout.Write(resp.Stdout)
 	}
 	if len(resp.Stderr) > 0 {
-		os.Stderr.Write(resp.Stderr)
+		_, _ = os.Stderr.Write(resp.Stderr)
 	}
 	os.Exit(resp.ExitCode)
 }
@@ -238,7 +238,7 @@ func handleDaemon(cfg *config.Config, args []string) {
 			fmt.Fprintf(os.Stderr, "ghx: stop failed: %v\n", err)
 			os.Exit(1)
 		}
-		os.Stdout.Write(resp.Stdout)
+		_, _ = os.Stdout.Write(resp.Stdout)
 
 	case "status":
 		cl := client.New(cfg.SocketPath)
@@ -321,7 +321,7 @@ func handleCache(cfg *config.Config, args []string) {
 			fmt.Fprintf(os.Stderr, "ghx: %v\n", err)
 			os.Exit(1)
 		}
-		os.Stdout.Write(resp.Stdout)
+		_, _ = os.Stdout.Write(resp.Stdout)
 
 	case "keys":
 		resp, err := cl.Send(&protocol.Request{Type: protocol.TypeKeys})
@@ -330,7 +330,7 @@ func handleCache(cfg *config.Config, args []string) {
 			os.Exit(1)
 		}
 		var keys []string
-		json.Unmarshal(resp.Stdout, &keys)
+		_ = json.Unmarshal(resp.Stdout, &keys)
 		for _, k := range keys {
 			fmt.Println(k)
 		}
@@ -387,7 +387,7 @@ func printFormattedStats(data []byte) {
 				Hits   int64 `json:"hits"`
 				Misses int64 `json:"misses"`
 			}
-			json.Unmarshal(raw, &cmd)
+			_ = json.Unmarshal(raw, &cmd)
 			total := cmd.Hits + cmd.Misses
 			rate := 0.0
 			if total > 0 {

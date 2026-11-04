@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -92,7 +93,7 @@ func fetchAndInstall(version, destPath string) error {
 	if err != nil {
 		return fmt.Errorf("creating temp dir: %w", err)
 	}
-	defer os.RemoveAll(tmpDir)
+	defer func() { _ = os.RemoveAll(tmpDir) }()
 
 	archivePath := filepath.Join(tmpDir, asset)
 	if err := downloadAndVerify(version, asset, archivePath); err != nil {
@@ -171,7 +172,7 @@ func getLatestVersion() (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("fetching releases: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("GitHub API returned HTTP %d", resp.StatusCode)
@@ -241,7 +242,7 @@ func downloadChecksums(version string) (map[string]string, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
@@ -269,7 +270,7 @@ func downloadFile(url, destPath string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP %d for %s", resp.StatusCode, url)
@@ -279,10 +280,8 @@ func downloadFile(url, destPath string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-
 	_, err = io.Copy(f, resp.Body)
-	return err
+	return errors.Join(err, f.Close())
 }
 
 func verifyChecksum(filePath, expected string) error {
@@ -290,7 +289,7 @@ func verifyChecksum(filePath, expected string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	h := sha256.New()
 	if _, err := io.Copy(h, f); err != nil {
@@ -320,13 +319,13 @@ func extractFromTarGz(archivePath, destPath string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		return err
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 
 	tr := tar.NewReader(gz)
 	ghSuffix := "/bin/gh"
@@ -370,7 +369,7 @@ func extractFromZip(archivePath, destPath string) error {
 	if err != nil {
 		return err
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	ghSuffix := "/bin/gh"
 	if runtime.GOOS == "windows" {
@@ -395,17 +394,17 @@ func extractFromZip(archivePath, destPath string) error {
 
 			out, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
 			if err != nil {
-				rc.Close()
+				_ = rc.Close()
 				return err
 			}
 
 			_, copyErr := io.Copy(out, rc)
 			closeErr := out.Close()
-			rc.Close()
+			rcCloseErr := rc.Close()
 			if copyErr != nil {
 				return copyErr
 			}
-			return closeErr
+			return errors.Join(closeErr, rcCloseErr)
 		}
 	}
 
@@ -416,8 +415,11 @@ func acquireLock(lockPath string) (func(), error) {
 	for i := 0; i < lockRetries; i++ {
 		f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0644)
 		if err == nil {
-			f.Close()
-			return func() { os.Remove(lockPath) }, nil
+			if err := f.Close(); err != nil {
+				_ = os.Remove(lockPath)
+				return nil, err
+			}
+			return func() { _ = os.Remove(lockPath) }, nil
 		}
 		if !os.IsExist(err) {
 			return nil, err
@@ -425,7 +427,7 @@ func acquireLock(lockPath string) (func(), error) {
 		// Stale lock detection
 		info, statErr := os.Stat(lockPath)
 		if statErr == nil && time.Since(info.ModTime()) > lockTimeout {
-			os.Remove(lockPath)
+			_ = os.Remove(lockPath)
 			continue
 		}
 		time.Sleep(time.Second)
@@ -444,14 +446,12 @@ func atomicInstall(src, dst string) error {
 	if err != nil {
 		return err
 	}
-	defer in.Close()
-
 	out, err := os.OpenFile(dst, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
 	if err != nil {
+		_ = in.Close()
 		return err
 	}
-	defer out.Close()
 
-	_, err = io.Copy(out, in)
-	return err
+	_, copyErr := io.Copy(out, in)
+	return errors.Join(copyErr, out.Close(), in.Close())
 }
