@@ -658,3 +658,28 @@ fails with a diagnostic before changing the socket or PID file. The persistent
 `.sock.lock` file must remain in place; it does not indicate a live daemon on its
 own. Stale PID files never authorize signalling a process. Startup also refuses
 an already-listening socket, including daemons from older releases.
+
+
+### Aggregate cache diagnostics
+
+The daemon's `/api/stats` response, `ghx xcache stats`, and dashboard expose:
+
+- `miss_reasons.bypass`: explicit `--no-cache` or `GHX_NO_CACHE=1` requests.
+- `miss_reasons.expired`: the direct lookup found an expired entry.
+- `miss_reasons.absent`: the direct lookup found no retained entry. This includes
+  first use, earlier invalidation/eviction/flush, or an unretained result; it is
+  not proof of a cold request. No extra history of removed keys is retained.
+- `miss_reasons.unspecified`: misses recorded without a recognized reason.
+- `removal_reasons`: entry counts split into expiration, capacity eviction,
+  mutation/scoped invalidation, and full flush. These count entries, not requests.
+
+Miss reasons sum to misses. Coalesced requests remain hits and do not add another
+miss reason. Expiration is observed lazily during lookup. Removal counters and
+request counters have different denominators and must not be added together.
+The existing `evictions` counter retains its historical meaning, including
+expiration and invalidation removals. Cache replacement is not an eviction.
+
+These aggregate diagnostics work with `log_args: false`; they add no arguments,
+response content, repository names, or unbounded labels. They reset when the
+daemon restarts and are not GitHub REST request or quota counters. Freshness
+bypasses, mutation invalidation, and cache retention limits are unchanged.

@@ -30,11 +30,29 @@ func (e *Entry) IsExpired() bool {
 // DefaultMaxBytes bounds retained stdout and stderr payloads to 64 MiB.
 const DefaultMaxBytes int64 = 64 << 20
 
+// LookupStatus describes the direct lookup, without retaining removed cache keys.
+type LookupStatus string
+
+const (
+	LookupHit     LookupStatus = "hit"
+	LookupAbsent  LookupStatus = "absent"
+	LookupExpired LookupStatus = "expired"
+)
+
+// RemovalReasons counts entries removed, not requests or GitHub API calls.
+type RemovalReasons struct {
+	Expired     int64 `json:"expired"`
+	Capacity    int64 `json:"capacity"`
+	Invalidated int64 `json:"invalidated"`
+	Flushed     int64 `json:"flushed"`
+}
+
 // Usage reports the retained response-byte budget and rejected insertions.
 type Usage struct {
-	Bytes    int64 `json:"cache_bytes"`
-	MaxBytes int64 `json:"max_cache_bytes"`
-	Rejected int64 `json:"cache_rejected"`
+	Bytes          int64          `json:"cache_bytes"`
+	MaxBytes       int64          `json:"max_cache_bytes"`
+	Rejected       int64          `json:"cache_rejected"`
+	RemovalReasons RemovalReasons `json:"removal_reasons"`
 }
 
 type storedEntry struct {
@@ -49,6 +67,7 @@ type Cache struct {
 	maxBytes int64
 	bytes    int64
 	rejected int64
+	removals RemovalReasons
 	items    map[string]*list.Element
 	order    *list.List // front = most recently used
 	onEvict  func(key string)
@@ -79,23 +98,31 @@ func (c *Cache) OnEvict(fn func(key string)) {
 
 // Get retrieves an entry by key. Returns nil if not found or expired.
 func (c *Cache) Get(key string) *Entry {
+	entry, _ := c.GetWithStatus(key)
+	return entry
+}
+
+// GetWithStatus also explains a miss. Absent includes cold, removed and rejected
+// keys: distinguishing those would require retaining additional key history.
+func (c *Cache) GetWithStatus(key string) (*Entry, LookupStatus) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	elem, ok := c.items[key]
 	if !ok {
-		return nil
+		return nil, LookupAbsent
 	}
 
 	entry := elem.Value.(*storedEntry).entry
 	if entry.IsExpired() {
+		c.removals.Expired++
 		c.removeElement(elem)
-		return nil
+		return nil, LookupExpired
 	}
 
 	// Move to front (most recently used)
 	c.order.MoveToFront(elem)
-	return entry
+	return entry, LookupHit
 }
 
 // Contains reports whether key holds a live entry without affecting LRU order.
@@ -158,6 +185,7 @@ func (c *Cache) InvalidateNamespace(host, repo string, resource allowlist.Resour
 	}
 
 	for _, elem := range toRemove {
+		c.removals.Invalidated++
 		c.removeElement(elem)
 	}
 	return len(toRemove)
@@ -176,6 +204,7 @@ func (c *Cache) InvalidateRepo(host, repo string) int {
 		}
 	}
 	for _, elem := range toRemove {
+		c.removals.Invalidated++
 		c.removeElement(elem)
 	}
 	return len(toRemove)
@@ -187,6 +216,7 @@ func (c *Cache) Flush() int {
 	defer c.mu.Unlock()
 
 	count := c.order.Len()
+	c.removals.Flushed += int64(count)
 	c.items = make(map[string]*list.Element)
 	c.order.Init()
 	c.bytes = 0
@@ -204,7 +234,7 @@ func (c *Cache) Size() int {
 func (c *Cache) Usage() Usage {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return Usage{Bytes: c.bytes, MaxBytes: c.maxBytes, Rejected: c.rejected}
+	return Usage{Bytes: c.bytes, MaxBytes: c.maxBytes, Rejected: c.rejected, RemovalReasons: c.removals}
 }
 
 // Keys returns all current cache keys (for debugging).
@@ -222,6 +252,7 @@ func (c *Cache) Keys() []string {
 func (c *Cache) evictOldest() {
 	elem := c.order.Back()
 	if elem != nil {
+		c.removals.Capacity++
 		c.removeElement(elem)
 	}
 }
