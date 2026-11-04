@@ -81,7 +81,10 @@ func TestDashboardLogArgs(t *testing.T) {
 		var stats struct {
 			LogArgs bool `json:"log_args"`
 		}
-		if json.Unmarshal(rec.Body.Bytes(), &stats); stats.LogArgs != enabled || rec.Code != http.StatusOK {
+		if err := json.Unmarshal(rec.Body.Bytes(), &stats); err != nil {
+			t.Fatalf("stats = %s (%v)", rec.Body.String(), err)
+		}
+		if stats.LogArgs != enabled || rec.Code != http.StatusOK {
 			t.Fatalf("stats log_args = %v, want %v", stats.LogArgs, enabled)
 		}
 	}

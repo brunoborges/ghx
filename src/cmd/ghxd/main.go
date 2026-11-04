@@ -28,7 +28,11 @@ func main() {
 			log.Printf("warning: cannot open log file %s: %v (logging to stderr)", cfg.LogFile, err)
 		} else {
 			log.SetOutput(f)
-			defer f.Close()
+			defer func() {
+				if err := f.Close(); err != nil {
+					log.Printf("close log file: %v", err)
+				}
+			}()
 		}
 	}
 

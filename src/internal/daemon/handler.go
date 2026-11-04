@@ -232,7 +232,7 @@ func entryResult(e *cache.Entry) *executor.Result {
 func (h *Handler) finish(plan shape.Plan, req *protocol.Request, result *executor.Result, cached bool) *protocol.Response {
 	if plan.JQ != "" {
 		var out []byte
-		var err error = errNonZeroExit
+		err := errNonZeroExit
 		if result.ExitCode == 0 {
 			out, err = shape.ApplyJQ(result.Stdout, plan.JQ)
 		}

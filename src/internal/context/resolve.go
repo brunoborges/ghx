@@ -100,11 +100,8 @@ func tokenHash(token string) string {
 
 // CacheKey builds a deterministic cache key from the execution context and command args.
 func CacheKey(ctx ExecContext, args []string) string {
-	h := sha256.New()
-	fmt.Fprintf(h, "host=%s\n", ctx.Host)
-	fmt.Fprintf(h, "repo=%s\n", ctx.Repo)
-	fmt.Fprintf(h, "branch=%s\n", ctx.Branch)
-	fmt.Fprintf(h, "token=%s\n", ctx.TokenHash)
-	fmt.Fprintf(h, "args=%s\n", strings.Join(args, "\x00"))
-	return fmt.Sprintf("%x", h.Sum(nil))
+	key := fmt.Sprintf("host=%s\nrepo=%s\nbranch=%s\ntoken=%s\nargs=%s\n",
+		ctx.Host, ctx.Repo, ctx.Branch, ctx.TokenHash, strings.Join(args, "\x00"))
+	hash := sha256.Sum256([]byte(key))
+	return fmt.Sprintf("%x", hash)
 }

@@ -3,6 +3,7 @@ package daemon
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -64,7 +65,7 @@ func NewServer(cfg *config.Config, version string, resolvedGHPath string) *Serve
 }
 
 // Run starts the daemon and blocks until shutdown.
-func (s *Server) Run() error {
+func (s *Server) Run() (runErr error) {
 	// Ensure socket directory exists
 	socketDir := filepath.Dir(s.cfg.SocketPath)
 	if err := os.MkdirAll(socketDir, 0700); err != nil {
@@ -77,7 +78,11 @@ func (s *Server) Run() error {
 		return fmt.Errorf("single-instance check: %w", err)
 	}
 	if lock != nil {
-		defer lock.Close()
+		defer func() {
+			if err := lock.Close(); err != nil {
+				runErr = errors.Join(runErr, fmt.Errorf("close daemon lock: %w", err))
+			}
+		}()
 	}
 
 	// Remove stale socket (no-op on Windows)
@@ -90,7 +95,11 @@ func (s *Server) Run() error {
 	if err != nil {
 		return fmt.Errorf("listen: %w", err)
 	}
-	defer ln.Close()
+	defer func() {
+		if err := ln.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			runErr = errors.Join(runErr, fmt.Errorf("close daemon listener: %w", err))
+		}
+	}()
 	s.lifecycleMu.Lock()
 	select {
 	case <-s.done:
@@ -103,16 +112,18 @@ func (s *Server) Run() error {
 
 	// Set socket permissions (no-op on Windows)
 	if err := setSocketPermissions(s.cfg.SocketPath); err != nil {
-		ln.Close()
 		return fmt.Errorf("set socket permissions: %w", err)
 	}
 
 	// Write PID file
 	if err := s.writePIDFile(); err != nil {
-		ln.Close()
 		return fmt.Errorf("write pid: %w", err)
 	}
-	defer s.removePIDFile()
+	defer func() {
+		if err := s.removePIDFile(); err != nil {
+			runErr = errors.Join(runErr, err)
+		}
+	}()
 
 	// Start HTTP server for dashboard (skip if port is 0)
 	if s.cfg.DashboardPort != 0 {
@@ -169,11 +180,18 @@ func (s *Server) Run() error {
 
 func (s *Server) handleConn(conn net.Conn) {
 	defer s.wg.Done()
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+			log.Printf("close connection: %v", err)
+		}
+	}()
 
 	// Short read deadline guards against clients that connect but never send a
 	// request (e.g. health-check probes from IsRunning that close immediately).
-	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+	if err := conn.SetReadDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		log.Printf("set request read deadline: %v", err)
+		return
+	}
 
 	var req protocol.Request
 	if err := protocol.ReadMessage(conn, &req); err != nil {
@@ -188,13 +206,18 @@ func (s *Server) handleConn(conn net.Conn) {
 	// (multi-minute GraphQL queries, large JSON payloads) must not be cut off by
 	// a fixed socket timeout, which would cause the client to fall back to direct
 	// execution and silently double-spend API quota.
-	conn.SetDeadline(time.Time{})
+	if err := conn.SetDeadline(time.Time{}); err != nil {
+		log.Printf("clear request deadline: %v", err)
+		return
+	}
 
 	resp := s.handler.Handle(&req)
 
 	// Check for shutdown request
 	if req.Type == protocol.TypeShutdown {
-		protocol.WriteMessage(conn, resp)
+		if err := protocol.WriteMessage(conn, resp); err != nil {
+			log.Printf("write shutdown response: %v", err)
+		}
 		go s.Shutdown()
 		return
 	}
@@ -242,7 +265,7 @@ func (s *Server) httpHandler() http.Handler {
 			cacheSnapshot
 		}{s.version, s.cfg.LogArgs, snap}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		writeJSON(w, resp)
 	})
 
 	mux.HandleFunc("/api/log", func(w http.ResponseWriter, r *http.Request) {
@@ -259,13 +282,13 @@ func (s *Server) httpHandler() http.Handler {
 		}
 		entries := s.stats.Log(limit)
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(entries)
+		writeJSON(w, entries)
 	})
 
 	mux.HandleFunc("/api/ttl-analysis", func(w http.ResponseWriter, r *http.Request) {
 		recs := s.stats.TTLAnalysis()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(recs)
+		writeJSON(w, recs)
 	})
 
 	// Mutating endpoints: POST only, origin-validated by localOnly
@@ -276,7 +299,7 @@ func (s *Server) httpHandler() http.Handler {
 		}
 		count := s.cache.Flush()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]interface{}{"flushed": count})
+		writeJSON(w, map[string]interface{}{"flushed": count})
 	})
 
 	mux.HandleFunc("/api/shutdown", func(w http.ResponseWriter, r *http.Request) {
@@ -285,7 +308,7 @@ func (s *Server) httpHandler() http.Handler {
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "shutting_down"})
+		writeJSON(w, map[string]string{"status": "shutting_down"})
 		if f, ok := w.(http.Flusher); ok {
 			f.Flush()
 		}
@@ -343,12 +366,16 @@ func (s *Server) Shutdown() {
 
 		// Stop accepting IPC before waiting for HTTP shutdown.
 		if ln != nil {
-			ln.Close()
+			if err := ln.Close(); err != nil && !errors.Is(err, net.ErrClosed) {
+				log.Printf("close daemon listener: %v", err)
+			}
 		}
 		if httpSrv != nil {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			httpSrv.Shutdown(ctx)
+			if err := httpSrv.Shutdown(ctx); err != nil {
+				log.Printf("shutdown dashboard server: %v", err)
+			}
 		}
 		log.Println("ghxd shutdown requested")
 	})
@@ -362,9 +389,20 @@ func (s *Server) writePIDFile() error {
 	return os.WriteFile(s.cfg.PIDFile, []byte(strconv.Itoa(os.Getpid())), 0600)
 }
 
-func (s *Server) removePIDFile() {
-	os.Remove(s.cfg.PIDFile)
-	os.Remove(s.cfg.SocketPath)
+func (s *Server) removePIDFile() error {
+	var removeErr error
+	for _, path := range []string{s.cfg.PIDFile, s.cfg.SocketPath} {
+		if err := os.Remove(path); err != nil && !errors.Is(err, os.ErrNotExist) {
+			removeErr = errors.Join(removeErr, fmt.Errorf("remove %s: %w", path, err))
+		}
+	}
+	return removeErr
+}
+
+func writeJSON(w http.ResponseWriter, value any) {
+	if err := json.NewEncoder(w).Encode(value); err != nil {
+		log.Printf("write JSON response: %v", err)
+	}
 }
 
 // refreshGHPath periodically re-resolves the gh binary path to pick up upgrades.

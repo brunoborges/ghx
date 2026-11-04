@@ -2,6 +2,7 @@ package client
 
 import (
 	"fmt"
+	"log"
 	"time"
 
 	"github.com/brunoborges/ghx/src/internal/ipc"
@@ -55,7 +56,11 @@ func (c *Client) Send(req *protocol.Request) (*protocol.Response, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connect to daemon: %w", err)
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			log.Printf("close daemon connection: %v", err)
+		}
+	}()
 
 	// Short deadline covers only the request write — guarding against a stuck daemon.
 	deadline := time.Now().Add(30 * time.Second)
@@ -63,7 +68,9 @@ func (c *Client) Send(req *protocol.Request) (*protocol.Response, error) {
 	if control {
 		deadline = time.Now().Add(c.timeout)
 	}
-	conn.SetWriteDeadline(deadline)
+	if err := conn.SetWriteDeadline(deadline); err != nil {
+		return nil, fmt.Errorf("set request deadline: %w", err)
+	}
 
 	if err := protocol.WriteMessage(conn, req); err != nil {
 		return nil, fmt.Errorf("send request: %w", err)
@@ -75,9 +82,13 @@ func (c *Client) Send(req *protocol.Request) (*protocol.Response, error) {
 	if control {
 		// Invalidation follows a completed mutation; a stuck daemon must not
 		// hold that command open indefinitely. Execution requests stay unlimited.
-		conn.SetDeadline(deadline)
+		if err := conn.SetDeadline(deadline); err != nil {
+			return nil, &ErrRequestSent{Cause: fmt.Errorf("set response deadline: %w", err)}
+		}
 	} else {
-		conn.SetDeadline(time.Time{})
+		if err := conn.SetDeadline(time.Time{}); err != nil {
+			return nil, &ErrRequestSent{Cause: fmt.Errorf("clear request deadline: %w", err)}
+		}
 	}
 
 	var resp protocol.Response
@@ -96,6 +107,8 @@ func (c *Client) IsRunning() bool {
 	if err != nil {
 		return false
 	}
-	conn.Close()
+	if err := conn.Close(); err != nil {
+		return false
+	}
 	return true
 }

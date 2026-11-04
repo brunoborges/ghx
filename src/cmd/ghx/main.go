@@ -115,10 +115,16 @@ func main() {
 	}
 
 	if len(resp.Stdout) > 0 {
-		os.Stdout.Write(resp.Stdout)
+		if _, err := os.Stdout.Write(resp.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "ghx: writing stdout: %v\n", err)
+			os.Exit(1)
+		}
 	}
 	if len(resp.Stderr) > 0 {
-		os.Stderr.Write(resp.Stderr)
+		if _, err := os.Stderr.Write(resp.Stderr); err != nil {
+			fmt.Fprintf(os.Stderr, "ghx: writing stderr: %v\n", err)
+			os.Exit(1)
+		}
 	}
 	os.Exit(resp.ExitCode)
 }
@@ -238,7 +244,10 @@ func handleDaemon(cfg *config.Config, args []string) {
 			fmt.Fprintf(os.Stderr, "ghx: stop failed: %v\n", err)
 			os.Exit(1)
 		}
-		os.Stdout.Write(resp.Stdout)
+		if _, err := os.Stdout.Write(resp.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "ghx: writing stdout: %v\n", err)
+			os.Exit(1)
+		}
 
 	case "status":
 		cl := client.New(cfg.SocketPath)
@@ -321,7 +330,10 @@ func handleCache(cfg *config.Config, args []string) {
 			fmt.Fprintf(os.Stderr, "ghx: %v\n", err)
 			os.Exit(1)
 		}
-		os.Stdout.Write(resp.Stdout)
+		if _, err := os.Stdout.Write(resp.Stdout); err != nil {
+			fmt.Fprintf(os.Stderr, "ghx: writing stdout: %v\n", err)
+			os.Exit(1)
+		}
 
 	case "keys":
 		resp, err := cl.Send(&protocol.Request{Type: protocol.TypeKeys})
@@ -330,7 +342,10 @@ func handleCache(cfg *config.Config, args []string) {
 			os.Exit(1)
 		}
 		var keys []string
-		json.Unmarshal(resp.Stdout, &keys)
+		if err := json.Unmarshal(resp.Stdout, &keys); err != nil {
+			fmt.Fprintf(os.Stderr, "ghx: parsing cache keys: %v\n", err)
+			os.Exit(1)
+		}
 		for _, k := range keys {
 			fmt.Println(k)
 		}
@@ -360,7 +375,10 @@ func printFormattedStats(data []byte) {
 		RemovalReasons *struct{ Expired, Capacity, Invalidated, Flushed int64 } `json:"removal_reasons"`
 	}
 	if err := json.Unmarshal(data, &stats); err != nil {
-		os.Stdout.Write(data)
+		if _, writeErr := os.Stdout.Write(data); writeErr != nil {
+			fmt.Fprintf(os.Stderr, "ghx: writing stats: %v\n", writeErr)
+			os.Exit(1)
+		}
 		return
 	}
 
@@ -387,7 +405,10 @@ func printFormattedStats(data []byte) {
 				Hits   int64 `json:"hits"`
 				Misses int64 `json:"misses"`
 			}
-			json.Unmarshal(raw, &cmd)
+			if err := json.Unmarshal(raw, &cmd); err != nil {
+				fmt.Fprintf(os.Stderr, "ghx: parsing stats for %s: %v\n", name, err)
+				continue
+			}
 			total := cmd.Hits + cmd.Misses
 			rate := 0.0
 			if total > 0 {

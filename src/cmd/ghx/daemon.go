@@ -29,7 +29,9 @@ func restartDaemon(cfg *config.Config) error {
 		if resp.Error != "" || resp.ExitCode != 0 {
 			return fmt.Errorf("stop daemon: exit code %d: %s", resp.ExitCode, resp.Error)
 		}
-		os.Stdout.Write(resp.Stdout)
+		if _, err := os.Stdout.Write(resp.Stdout); err != nil {
+			return fmt.Errorf("write daemon output: %w", err)
+		}
 	}
 	if err := waitForDaemonStop(cfg.SocketPath, daemonStopTimeout); err != nil {
 		return err
@@ -114,13 +116,17 @@ func daemonExitError(err error) error {
 	return fmt.Errorf("daemon exited before becoming ready")
 }
 
-func daemonReady(path string, timeout time.Duration) error {
+func daemonReady(path string, timeout time.Duration) (readyErr error) {
 	deadline := time.Now().Add(timeout)
 	conn, err := ipc.Dial(path, timeout)
 	if err != nil {
 		return err
 	}
-	defer conn.Close()
+	defer func() {
+		if err := conn.Close(); err != nil {
+			readyErr = errors.Join(readyErr, fmt.Errorf("close daemon readiness connection: %w", err))
+		}
+	}()
 	if err := conn.SetDeadline(deadline); err != nil {
 		return err
 	}

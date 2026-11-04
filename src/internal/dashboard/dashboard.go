@@ -1,6 +1,7 @@
 package dashboard
 
 import (
+	"log"
 	"net/http"
 )
 
@@ -12,7 +13,9 @@ func Handler() http.HandlerFunc {
 			return
 		}
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
-		w.Write([]byte(dashboardHTML))
+		if _, err := w.Write([]byte(dashboardHTML)); err != nil {
+			log.Printf("write dashboard response: %v", err)
+		}
 	}
 }
 
