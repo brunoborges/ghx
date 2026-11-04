@@ -64,15 +64,9 @@ jobs:
           test -z "$(gofmt -l .)"
 
   golangci-lint:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.ref }}
-
-      - uses: golangci/golangci-lint-action@v9
-        with:
-          version: v2.13
+    uses: ./.github/workflows/golangci-lint.yml
+    with:
+      ref: ${{ inputs.ref }}
 
   daily-test:
     if: github.event_name != 'pull_request'

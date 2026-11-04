@@ -1,6 +1,7 @@
 # ghx — GitHub CLI Cache Proxy
 
 [![CI](https://github.com/brunoborges/ghx/actions/workflows/ci.yml/badge.svg)](https://github.com/brunoborges/ghx/actions/workflows/ci.yml)
+[![golangci-lint](https://github.com/brunoborges/ghx/actions/workflows/golangci-lint.yml/badge.svg)](https://github.com/brunoborges/ghx/actions/workflows/golangci-lint.yml)
 [![Release](https://github.com/brunoborges/ghx/actions/workflows/release.yml/badge.svg)](https://github.com/brunoborges/ghx/releases/latest)
 [![Latest release](https://img.shields.io/github/v/release/brunoborges/ghx?label=Release)](https://github.com/brunoborges/ghx/releases/latest)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
