@@ -47,6 +47,15 @@ func (cs *CommandStats) AvgLatencyMs() float64 {
 	return cs.TotalLatencyMs / float64(cs.RequestCount)
 }
 
+// MissReasons are aggregate request counters. Absent means no retained entry;
+// it does not claim the request was cold rather than previously invalidated.
+type MissReasons struct {
+	Bypass      int64 `json:"bypass"`
+	Expired     int64 `json:"expired"`
+	Absent      int64 `json:"absent"`
+	Unspecified int64 `json:"unspecified"`
+}
+
 // Stats holds all metrics for the daemon.
 type Stats struct {
 	mu            sync.RWMutex
@@ -54,6 +63,7 @@ type Stats struct {
 	total         int64
 	hits          int64
 	misses        int64
+	missReasons   MissReasons
 	passthrough   int64
 	coalesced     int64
 	evictions     int64
@@ -80,13 +90,13 @@ func New() *Stats {
 }
 
 // Record logs a request and updates counters.
-func (s *Stats) Record(cmdKey string, cacheKey string, result RequestResult, latencyMs float64) {
-	s.RecordDetailed(cmdKey, cacheKey, result, latencyMs, nil, nil)
+func (s *Stats) Record(cmdKey string, cacheKey string, result RequestResult, latencyMs float64, missReason ...string) {
+	s.RecordDetailed(cmdKey, cacheKey, result, latencyMs, nil, nil, missReason...)
 }
 
 // RecordDetailed is Record with the command's arguments attached to the log
 // entry. Callers are responsible for redacting them (see RedactArgs).
-func (s *Stats) RecordDetailed(cmdKey string, cacheKey string, result RequestResult, latencyMs float64, args, fetch []string) {
+func (s *Stats) RecordDetailed(cmdKey string, cacheKey string, result RequestResult, latencyMs float64, args, fetch []string, missReason ...string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -108,6 +118,20 @@ func (s *Stats) RecordDetailed(cmdKey string, cacheKey string, result RequestRes
 	case ResultMiss:
 		s.misses++
 		cs.Misses++
+		reason := ""
+		if len(missReason) > 0 {
+			reason = missReason[0]
+		}
+		switch reason {
+		case "bypass":
+			s.missReasons.Bypass++
+		case "expired":
+			s.missReasons.Expired++
+		case "absent":
+			s.missReasons.Absent++
+		default:
+			s.missReasons.Unspecified++
+		}
 	case ResultPassthrough:
 		s.passthrough++
 		cs.Passthrough++
@@ -170,6 +194,7 @@ type Snapshot struct {
 	Total         int64                    `json:"total"`
 	Hits          int64                    `json:"hits"`
 	Misses        int64                    `json:"misses"`
+	MissReasons   MissReasons              `json:"miss_reasons"`
 	Passthrough   int64                    `json:"passthrough"`
 	Coalesced     int64                    `json:"coalesced"`
 	Evictions     int64                    `json:"evictions"`
@@ -205,6 +230,7 @@ func (s *Stats) Snapshot(cacheSize, maxCacheSize int) Snapshot {
 		Total:         s.total,
 		Hits:          s.hits,
 		Misses:        s.misses,
+		MissReasons:   s.missReasons,
 		Passthrough:   s.passthrough,
 		Coalesced:     s.coalesced,
 		Evictions:     s.evictions,

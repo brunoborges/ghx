@@ -123,6 +123,13 @@ const dashboardHTML = `<!DOCTYPE html>
 </div>
 
 <div class="section">
+  <h2>Aggregate Cache Diagnostics</h2>
+  <p id="missReasons">Miss reasons unavailable</p>
+  <p id="removalReasons">Entry removal reasons unavailable</p>
+  <p>Absent means no retained entry, including cold or previously removed keys. Removals count entries, not requests. No argument logging is needed.</p>
+</div>
+
+<div class="section">
   <h2>Per-Command Breakdown</h2>
   <table id="cmdtable">
     <thead><tr>
@@ -179,6 +186,14 @@ function renderStats(s) {
   $('#total').textContent = fmtNum(s.total);
   $('#hits').textContent = fmtNum(s.hits);
   $('#misses').textContent = fmtNum(s.misses);
+  if (s.miss_reasons) {
+    const r = s.miss_reasons;
+    $('#missReasons').textContent = 'Misses: bypass ' + fmtNum(r.bypass) + ', expired ' + fmtNum(r.expired) + ', absent ' + fmtNum(r.absent) + ', unspecified ' + fmtNum(r.unspecified);
+  }
+  if (s.removal_reasons) {
+    const r = s.removal_reasons;
+    $('#removalReasons').textContent = 'Entry removals: expired ' + fmtNum(r.expired) + ', capacity ' + fmtNum(r.capacity) + ', invalidated ' + fmtNum(r.invalidated) + ', flushed ' + fmtNum(r.flushed);
+  }
   $('#passthrough').textContent = fmtNum(s.passthrough);
   $('#coalesced').textContent = fmtNum(s.coalesced);
   $('#hitrate').textContent = fmtPct(s.hit_rate);

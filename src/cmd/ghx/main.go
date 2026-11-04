@@ -343,19 +343,21 @@ func handleCache(cfg *config.Config, args []string) {
 
 func printFormattedStats(data []byte) {
 	var stats struct {
-		Uptime        string                     `json:"uptime"`
-		Total         int64                      `json:"total"`
-		Hits          int64                      `json:"hits"`
-		Misses        int64                      `json:"misses"`
-		Passthrough   int64                      `json:"passthrough"`
-		Coalesced     int64                      `json:"coalesced"`
-		HitRate       float64                    `json:"hit_rate"`
-		CacheSize     int                        `json:"cache_size"`
-		CacheBytes    int64                      `json:"cache_bytes"`
-		MaxCacheBytes int64                      `json:"max_cache_bytes"`
-		CacheRejected int64                      `json:"cache_rejected"`
-		MaxCacheSize  int                        `json:"max_cache_size"`
-		Commands      map[string]json.RawMessage `json:"commands"`
+		Uptime         string                                                   `json:"uptime"`
+		Total          int64                                                    `json:"total"`
+		Hits           int64                                                    `json:"hits"`
+		Misses         int64                                                    `json:"misses"`
+		Passthrough    int64                                                    `json:"passthrough"`
+		Coalesced      int64                                                    `json:"coalesced"`
+		HitRate        float64                                                  `json:"hit_rate"`
+		CacheSize      int                                                      `json:"cache_size"`
+		CacheBytes     int64                                                    `json:"cache_bytes"`
+		MaxCacheBytes  int64                                                    `json:"max_cache_bytes"`
+		CacheRejected  int64                                                    `json:"cache_rejected"`
+		MaxCacheSize   int                                                      `json:"max_cache_size"`
+		Commands       map[string]json.RawMessage                               `json:"commands"`
+		MissReasons    *struct{ Bypass, Expired, Absent, Unspecified int64 }    `json:"miss_reasons"`
+		RemovalReasons *struct{ Expired, Capacity, Invalidated, Flushed int64 } `json:"removal_reasons"`
 	}
 	if err := json.Unmarshal(data, &stats); err != nil {
 		os.Stdout.Write(data)
@@ -371,6 +373,12 @@ func printFormattedStats(data []byte) {
 	fmt.Printf("Cache Size:      %d / %d entries\n", stats.CacheSize, stats.MaxCacheSize)
 	fmt.Printf("Cache Bytes:     %d / %d bytes\n", stats.CacheBytes, stats.MaxCacheBytes)
 	fmt.Printf("Cache Rejected:  %d\n", stats.CacheRejected)
+	if stats.MissReasons != nil {
+		fmt.Printf("Miss Reasons:    bypass=%d expired=%d absent=%d unspecified=%d\n", stats.MissReasons.Bypass, stats.MissReasons.Expired, stats.MissReasons.Absent, stats.MissReasons.Unspecified)
+	}
+	if stats.RemovalReasons != nil {
+		fmt.Printf("Entry Removals:  expired=%d capacity=%d invalidated=%d flushed=%d\n", stats.RemovalReasons.Expired, stats.RemovalReasons.Capacity, stats.RemovalReasons.Invalidated, stats.RemovalReasons.Flushed)
+	}
 
 	if len(stats.Commands) > 0 {
 		fmt.Println("\nTop Commands:")

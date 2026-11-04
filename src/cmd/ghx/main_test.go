@@ -23,6 +23,11 @@ func TestPrintFormattedStatsCacheBudget(t *testing.T) {
 			},
 		},
 		{
+			name: "aggregate miss and removal reasons",
+			data: `{"miss_reasons":{"bypass":2,"expired":3,"absent":4,"unspecified":1},"removal_reasons":{"expired":3,"capacity":5,"invalidated":6,"flushed":7}}`,
+			want: []string{"Miss Reasons:    bypass=2 expired=3 absent=4 unspecified=1", "Entry Removals:  expired=3 capacity=5 invalidated=6 flushed=7"},
+		},
+		{
 			name: "legacy stats without byte fields",
 			data: `{"cache_size":2,"max_cache_size":10}`,
 			want: []string{
